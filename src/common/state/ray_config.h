@@ -96,7 +96,7 @@ class RayConfig {
         max_num_to_reconstruct_(10000),
         local_scheduler_fetch_request_size_(10000),
         kill_worker_timeout_milliseconds_(100),
-        manager_timeout_milliseconds_(1000),
+        manager_timeout_milliseconds_(10000),
         buf_size_(4096),
         max_time_for_handler_milliseconds_(1000),
         size_limit_(100),

@@ -22,7 +22,7 @@ extern int usleep(useconds_t usec);
 
 int bind_inet_sock(const int port, bool shall_listen) {
   struct sockaddr_in name;
-  int socket_fd = socket(PF_INET, SOCK_STREAM, 0);
+  int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (socket_fd < 0) {
     LOG_ERROR("socket() failed for port %d.", port);
     return -1;
@@ -32,11 +32,13 @@ int bind_inet_sock(const int port, bool shall_listen) {
   name.sin_addr.s_addr = htonl(INADDR_ANY);
   int on = 1;
   /* TODO(pcm): http://stackoverflow.com/q/1150635 */
+  /*
   if (ioctl(socket_fd, FIONBIO, (char *) &on) < 0) {
     LOG_ERROR("ioctl failed");
     close(socket_fd);
     return -1;
   }
+  */
   int *const pon = (int *const) & on;
   if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, pon, sizeof(on)) < 0) {
     LOG_ERROR("setsockopt failed for port %d", port);

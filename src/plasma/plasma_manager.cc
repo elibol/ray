@@ -19,6 +19,7 @@
 #include <poll.h>
 #include <assert.h>
 #include <netinet/in.h>
+#include <time.h>
 
 /* C++ includes. */
 #include <list>
@@ -540,28 +541,45 @@ void process_message(event_loop *loop,
                      int events);
 
 int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
-  LOG_DEBUG("Writing data to fd %d", conn->fd);
+  LOG_ERROR("Writing data to fd %d %p", conn->fd, buf->data + conn->cursor);
   ssize_t r, s;
-  /* Try to write one buf_size at a time. */
-  s = buf->data_size + buf->metadata_size - conn->cursor;
-  if (s > RayConfig::instance().buf_size())
-    s = RayConfig::instance().buf_size();
-  r = write(conn->fd, buf->data + conn->cursor, s);
 
+  /* Write data as quickly as possible. */
+  int64_t chunk_size = 4096;
+  int64_t min_size = chunk_size;
+  int64_t t = buf->data_size + buf->metadata_size;
+  int64_t c = conn->cursor;
+  s = t - c;
   int err;
-  if (r <= 0) {
-    LOG_ERROR("Write error");
-    err = errno;
-  } else {
-    conn->cursor += r;
-    CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
-    /* If we've finished writing this buffer, reset the cursor. */
-    if (conn->cursor == buf->data_size + buf->metadata_size) {
-      LOG_DEBUG("writing on channel %d finished", conn->fd);
-      ClientConnection_finish_request(conn);
+  uint start_time = clock();
+  while(s != 0){
+    min_size = chunk_size;
+    if(s < chunk_size){
+      min_size = s;
     }
-    err = 0;
+    r = write(conn->fd, buf->data + c, min_size);
+    if (r <= 0) {
+      LOG_ERROR("Write error");
+      return errno;
+    }
+    c += r;
+    s -= r;
   }
+
+  double duration = ((double)(clock()-start_time))/CLOCKS_PER_SEC;
+  char id_string[ID_STRING_SIZE];
+  ObjectID_to_string(buf->object_id, id_string, ID_STRING_SIZE);
+  LOG_ERROR("write time %s %lu %lu %f", id_string, (ulong) conn->cursor, (ulong) t, duration);
+
+  conn->cursor = c;
+  CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
+  /* If we've finished writing this buffer, reset the cursor. */
+  if (conn->cursor == buf->data_size + buf->metadata_size) {
+    LOG_DEBUG("writing on channel %d finished", conn->fd);
+    ClientConnection_finish_request(conn);
+    LOG_ERROR("write finish %s %lu %lu", id_string, (ulong) conn->cursor, (ulong) t);
+  }
+  err = 0;
   return err;
 }
 
@@ -628,6 +646,9 @@ void send_queued_request(event_loop *loop,
           buf->object_id.to_plasma_id()));
       /* Remove the object from the hash table of pending transfer requests. */
       conn->pending_object_transfers.erase(buf->object_id);
+      char id_string[ID_STRING_SIZE];
+      ObjectID_to_string(buf->object_id, id_string, ID_STRING_SIZE);
+      LOG_ERROR("OBJECT ERASED %s", id_string);
     }
     conn->transfer_queue.pop_front();
     delete buf;
@@ -635,31 +656,46 @@ void send_queued_request(event_loop *loop,
 }
 
 int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
-  LOG_DEBUG("Reading data from fd %d to %p", conn->fd,
+  LOG_ERROR("Reading data from fd %d to %p", conn->fd,
             buf->data + conn->cursor);
   ssize_t r, s;
   CHECK(buf != NULL);
-  /* Try to read one buf_size at a time. */
-  s = buf->data_size + buf->metadata_size - conn->cursor;
-  if (s > RayConfig::instance().buf_size()) {
-    s = RayConfig::instance().buf_size();
-  }
-  r = read(conn->fd, buf->data + conn->cursor, s);
 
+  /* Read as quickly as possible. */
+  int64_t chunk_size = 4096;
+  int64_t min_size = chunk_size;
+  int64_t t = buf->data_size + buf->metadata_size;
+  int64_t c = conn->cursor;
+  s = t - c;
   int err;
-  if (r <= 0) {
-    LOG_ERROR("Read error");
-    err = errno;
-  } else {
-    conn->cursor += r;
-    CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
-    /* If the cursor is equal to the full object size, reset the cursor and
-     * we're done. */
-    if (conn->cursor == buf->data_size + buf->metadata_size) {
-      ClientConnection_finish_request(conn);
+  uint start_time = clock();
+  while(s != 0){
+    min_size = chunk_size;
+    if(s < chunk_size){
+      min_size = s;
     }
-    err = 0;
+    r = read(conn->fd, buf->data + c, min_size);
+    if (r <= 0) {
+      LOG_ERROR("Read error");
+      return errno;
+    }
+    c += r;
+    s -= r;
   }
+  double duration = ((double)(clock()-start_time))/CLOCKS_PER_SEC;
+  char id_string[ID_STRING_SIZE];
+  ObjectID_to_string(buf->object_id, id_string, ID_STRING_SIZE);
+  LOG_ERROR("read time %s %lu %lu %f", id_string, (ulong) conn->cursor, (ulong) t, duration);
+
+  conn->cursor = c;
+  CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
+  /* If the cursor is equal to the full object size, reset the cursor and
+   * we're done. */
+  if (conn->cursor == buf->data_size + buf->metadata_size) {
+    ClientConnection_finish_request(conn);
+    LOG_ERROR("read finish %s %lu", id_string, (ulong) t);
+  }
+  err = 0;
   return err;
 }
 
@@ -757,6 +793,11 @@ void process_transfer_request(event_loop *loop,
                               const char *addr,
                               int port,
                               ClientConnection *conn) {
+  
+  char id_string[ID_STRING_SIZE];
+  ObjectID_to_string(obj_id, id_string, ID_STRING_SIZE);
+  LOG_ERROR("process_transfer_request %s", id_string);
+
   ClientConnection *manager_conn =
       get_manager_connection(conn->manager_state, addr, port);
   if (manager_conn == NULL) {
@@ -767,6 +808,7 @@ void process_transfer_request(event_loop *loop,
    * ID, do not add the transfer request. */
   auto pending_it = manager_conn->pending_object_transfers.find(obj_id);
   if (pending_it != manager_conn->pending_object_transfers.end()) {
+    LOG_ERROR("process_transfer_request DUPE %s", id_string);
     return;
   }
 
@@ -831,6 +873,10 @@ void process_data_request(event_loop *loop,
                           int64_t data_size,
                           int64_t metadata_size,
                           ClientConnection *conn) {
+
+  char id_string[ID_STRING_SIZE];
+  LOG_ERROR("process_data_request %s", ObjectID_to_string(object_id, id_string, ID_STRING_SIZE));
+ 
   PlasmaRequestBuffer *buf = new PlasmaRequestBuffer();
   buf->object_id = object_id;
   buf->data_size = data_size;
@@ -970,6 +1016,9 @@ bool is_object_local(PlasmaManagerState *state, ObjectID object_id) {
 void request_transfer(ObjectID object_id,
                       const std::vector<std::string> &manager_vector,
                       void *context) {
+  char id_string[ID_STRING_SIZE];
+  LOG_ERROR("request_transfer %s", ObjectID_to_string(object_id, id_string, ID_STRING_SIZE));
+
   PlasmaManagerState *manager_state = (PlasmaManagerState *) context;
   /* This callback is called from object_table_subscribe, which guarantees that
    * the manager vector contains at least one element. */
@@ -1039,6 +1088,11 @@ void object_table_subscribe_callback(ObjectID object_id,
 void process_fetch_requests(ClientConnection *client_conn,
                             int num_object_ids,
                             plasma::ObjectID object_ids[]) {
+
+  char id_string[ID_STRING_SIZE];
+  ObjectID_to_string(object_ids[0], id_string, ID_STRING_SIZE);
+  LOG_ERROR("process_fetch_requests %d %s", num_object_ids, id_string);
+
   PlasmaManagerState *manager_state = client_conn->manager_state;
 
   int num_object_ids_to_request = 0;
@@ -1092,6 +1146,7 @@ void process_wait_request(ClientConnection *client_conn,
                           plasma::ObjectRequestMap &&object_requests,
                           uint64_t timeout_ms,
                           int num_ready_objects) {
+  LOG_ERROR("process_wait_request");
   CHECK(client_conn != NULL);
   PlasmaManagerState *manager_state = client_conn->manager_state;
   int num_object_requests = object_requests.size();
@@ -1209,8 +1264,12 @@ void object_table_lookup_fail_callback(ObjectID object_id,
 
 void process_status_request(ClientConnection *client_conn,
                             plasma::ObjectID object_id) {
+  char id_string[ID_STRING_SIZE];
+  ObjectID_to_string(object_id, id_string, ID_STRING_SIZE);
+
   /* Return success immediately if we already have this object. */
   if (is_object_local(client_conn->manager_state, object_id)) {
+    LOG_ERROR("process_status_request %s local", id_string);
     int status = ObjectStatus_Local;
     handle_sigpipe(
         plasma::SendStatusReply(client_conn->fd, &object_id, &status, 1),
@@ -1219,6 +1278,7 @@ void process_status_request(ClientConnection *client_conn,
   }
 
   if (client_conn->manager_state->db == NULL) {
+    LOG_ERROR("process_status_request %s nonexistent", id_string);
     int status = ObjectStatus_Nonexistent;
     handle_sigpipe(
         plasma::SendStatusReply(client_conn->fd, &object_id, &status, 1),
@@ -1227,6 +1287,7 @@ void process_status_request(ClientConnection *client_conn,
   }
 
   /* The object is not local, so check whether it is stored remotely. */
+  LOG_ERROR("process_status_request %s check_remote", id_string);
   object_table_lookup(client_conn->manager_state->db, object_id, NULL,
                       request_status_done, client_conn);
 }
@@ -1520,7 +1581,7 @@ void start_server(const char *store_socket_name,
       redis_primary_addr, redis_primary_port);
   CHECK(g_manager_state);
 
-  CHECK(listen(remote_sock, 128) != -1);
+  CHECK(listen(remote_sock, 3) != -1);
   CHECK(listen(local_sock, 128) != -1);
 
   LOG_DEBUG("Started server connected to store %s, listening on port %d",
