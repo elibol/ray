@@ -19,6 +19,7 @@
 #include <poll.h>
 #include <assert.h>
 #include <netinet/in.h>
+#include <time.h>
 
 /* C++ includes. */
 #include <list>
@@ -547,7 +548,11 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   if (s > RayConfig::instance().buf_size()) {
     s = RayConfig::instance().buf_size();
   }
+
+  int start_time = clock();
   r = write(conn->fd, buf->data + conn->cursor, s);
+  double duration = ((double)(clock()-start_time))/CLOCKS_PER_SEC;
+  LOG_ERROR("read", duration)
 
   int err;
   if (r <= 0) {
@@ -645,7 +650,11 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   if (s > RayConfig::instance().buf_size()) {
     s = RayConfig::instance().buf_size();
   }
+
+  int start_time = clock();
   r = read(conn->fd, buf->data + conn->cursor, s);
+  double duration = ((double)(clock()-start_time))/CLOCKS_PER_SEC;
+  LOG_ERROR("read", duration)
 
   int err;
   if (r <= 0) {
