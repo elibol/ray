@@ -555,7 +555,7 @@ void id_to_str(unsigned char *id, char *id_string, int id_length) {
   CHECK(id_length >= ID_STRING_SIZE);
   static const char hex[] = "0123456789abcdef";
   char *buf = id_string;
-  
+
   for (int i = 0; i < UNIQUE_ID_SIZE; i++) {
     unsigned int val = id[i];
     *buf++ = hex[val >> 4];
@@ -563,7 +563,7 @@ void id_to_str(unsigned char *id, char *id_string, int id_length) {
   }
   *buf = '\0';
 }
-	       
+
 void dump_logs(char name[], float arr[], unsigned char ids[][UNIQUE_ID_SIZE]) {
   char filename[1024];
   sprintf(filename, "/home/ubuntu/%s", name);
@@ -571,6 +571,9 @@ void dump_logs(char name[], float arr[], unsigned char ids[][UNIQUE_ID_SIZE]) {
   FILE *fp;
   fp = fopen(filename, "w");
   for (int i=-1;++i<LOG_SIZE;) {
+    if(arr[i] == 0){
+      break;
+    }
     char id_string[ID_STRING_SIZE];
     id_to_str(ids[i], id_string, ID_STRING_SIZE);
     fprintf(fp, "%s %f\n", id_string, arr[i]);
