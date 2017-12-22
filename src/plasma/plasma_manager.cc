@@ -541,15 +541,12 @@ void process_message(event_loop *loop,
                      int events);
 
 
-const int LOG_SIZE = 1000000;
-
-int write_log_i = 0;
-float write_log[LOG_SIZE] = {0};
-unsigned char write_ids[LOG_SIZE][UNIQUE_ID_SIZE];
-
-int read_log_i = 0;
-float read_log[LOG_SIZE] = {0};
-unsigned char read_ids[LOG_SIZE][UNIQUE_ID_SIZE];
+const int LOG_SIZE = 10000000;
+int log_i = 0;
+unsigned char log_ids[LOG_SIZE][UNIQUE_ID_SIZE];
+char log_op[LOG_SIZE];
+clock_t log_start[LOG_SIZE] = {0};
+clock_t log_end[LOG_SIZE] = {0};
 
 void id_to_str(unsigned char *id, char *id_string, int id_length) {
   CHECK(id_length >= ID_STRING_SIZE);
@@ -564,19 +561,20 @@ void id_to_str(unsigned char *id, char *id_string, int id_length) {
   *buf = '\0';
 }
 
-void dump_logs(char name[], float arr[], unsigned char ids[][UNIQUE_ID_SIZE]) {
+void dump_logs() {
   char filename[1024];
-  sprintf(filename, "/home/ubuntu/%s", name);
+  sprintf(filename, "/home/ubuntu/profile.txt");
 
   FILE *fp;
   fp = fopen(filename, "w");
   for (int i=-1;++i<LOG_SIZE;) {
-    if(arr[i] == 0){
+    if(log_start[i] == 0){
       break;
     }
     char id_string[ID_STRING_SIZE];
-    id_to_str(ids[i], id_string, ID_STRING_SIZE);
-    fprintf(fp, "%s %.10f\n", id_string, arr[i]);
+    id_to_str(log_ids[i], id_string, ID_STRING_SIZE);
+    // fprintf(fp, "%s %ld %ld\n", id_string, log_start[i], log_end[i]);
+    fprintf(fp, "%s %c %ld %ld\n", id_string, log_op[i], log_start[i], log_end[i]);
   }
 
   fclose(fp);
@@ -590,13 +588,13 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   if (s > RayConfig::instance().buf_size()) {
     s = RayConfig::instance().buf_size();
   }
-
-  int start_time = clock();
+  
+  log_start[log_i] = clock();
   r = write(conn->fd, buf->data + conn->cursor, s);
-  float duration = ((float)(clock()-start_time))/CLOCKS_PER_SEC;
-  write_log[write_log_i] = duration;
-  memcpy(write_ids[write_log_i], buf->object_id.id, UNIQUE_ID_SIZE);
-  write_log_i += 1;
+  log_end[log_i] = clock();
+  memcpy(log_ids[log_i], buf->object_id.id, UNIQUE_ID_SIZE);
+  log_op[log_i] = 'w';
+  log_i += 1;
 
   int err;
   if (r <= 0) {
@@ -607,7 +605,6 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
     CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
     /* If we've finished writing this buffer, reset the cursor. */
     if (conn->cursor == buf->data_size + buf->metadata_size) {
-      dump_logs((char*) "pm_writes.txt", write_log, write_ids);
       LOG_DEBUG("writing on channel %d finished", conn->fd);
       ClientConnection_finish_request(conn);
     }
@@ -696,12 +693,12 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
     s = RayConfig::instance().buf_size();
   }
 
-  int start_time = clock();
+  log_start[log_i] = clock();
   r = read(conn->fd, buf->data + conn->cursor, s);
-  float duration = ((float)(clock()-start_time))/CLOCKS_PER_SEC;
-  read_log[read_log_i] = duration;
-  memcpy(read_ids[read_log_i], buf->object_id.id, UNIQUE_ID_SIZE);
-  read_log_i += 1;
+  log_end[log_i] = clock();
+  memcpy(log_ids[log_i], buf->object_id.id, UNIQUE_ID_SIZE);
+  log_op[log_i] = 'r';
+  log_i += 1;
 
   int err;
   if (r <= 0) {
@@ -713,7 +710,6 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
     /* If the cursor is equal to the full object size, reset the cursor and
      * we're done. */
     if (conn->cursor == buf->data_size + buf->metadata_size) {
-      dump_logs((char*) "pm_reads.txt", read_log, read_ids);
       ClientConnection_finish_request(conn);
     }
     err = 0;
@@ -1609,6 +1605,7 @@ void start_server(const char *store_socket_name,
 void signal_handler(int signal) {
   LOG_DEBUG("Signal was %d", signal);
   if (signal == SIGTERM) {
+    dump_logs();
     if (g_manager_state) {
       PlasmaManagerState_free(g_manager_state);
     }
