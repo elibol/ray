@@ -541,17 +541,30 @@ void process_message(event_loop *loop,
                      int events);
 
 
-const uint LOG_SIZE = 1000000;
+const int LOG_SIZE = 1000000;
 
-uint write_log_i = 0;
+int write_log_i = 0;
 float write_log[LOG_SIZE] = {0};
-char write_ids[LOG_SIZE][UNIQUE_ID_SIZE];
+unsigned char write_ids[LOG_SIZE][UNIQUE_ID_SIZE];
 
-uint read_log_i = 0;
+int read_log_i = 0;
 float read_log[LOG_SIZE] = {0};
-char read_ids[LOG_SIZE][UNIQUE_ID_SIZE];
+unsigned char read_ids[LOG_SIZE][UNIQUE_ID_SIZE];
 
-void dump_logs(char name[], float arr[], char ids[][UNIQUE_ID_SIZE]) {
+void id_to_str(unsigned char *id, char *id_string, int id_length) {
+  CHECK(id_length >= ID_STRING_SIZE);
+  static const char hex[] = "0123456789abcdef";
+  char *buf = id_string;
+  
+  for (int i = 0; i < UNIQUE_ID_SIZE; i++) {
+    unsigned int val = id[i];
+    *buf++ = hex[val >> 4];
+    *buf++ = hex[val & 0xf];
+  }
+  *buf = '\0';
+}
+	       
+void dump_logs(char name[], float arr[], unsigned char ids[][UNIQUE_ID_SIZE]) {
   char filename[1024];
   sprintf(filename, "/home/ubuntu/%s", name);
 
@@ -559,7 +572,7 @@ void dump_logs(char name[], float arr[], char ids[][UNIQUE_ID_SIZE]) {
   fp = fopen(filename, "w");
   for (int i=-1;++i<LOG_SIZE;) {
     char id_string[ID_STRING_SIZE];
-    ObjectID_to_string(buf->object_id, id_string, ID_STRING_SIZE);
+    id_to_str(ids[i], id_string, ID_STRING_SIZE);
     fprintf(fp, "%s %f\n", id_string, arr[i]);
   }
 
@@ -579,7 +592,7 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   r = write(conn->fd, buf->data + conn->cursor, s);
   double duration = ((double)(clock()-start_time))/CLOCKS_PER_SEC;
   write_log[write_log_i] = duration;
-  strcpy(write_ids[write_log_i], buf->object_id);
+  memcpy(write_ids[write_log_i], buf->object_id.id, UNIQUE_ID_SIZE);
   write_log_i += 1;
 
   int err;
@@ -591,7 +604,7 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
     CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
     /* If we've finished writing this buffer, reset the cursor. */
     if (conn->cursor == buf->data_size + buf->metadata_size) {
-      dump_logs("pm_writes.txt", write_log, write_ids);
+      dump_logs((char*) "pm_writes.txt", write_log, write_ids);
       LOG_DEBUG("writing on channel %d finished", conn->fd);
       ClientConnection_finish_request(conn);
     }
@@ -684,7 +697,7 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   r = read(conn->fd, buf->data + conn->cursor, s);
   double duration = ((double)(clock()-start_time))/CLOCKS_PER_SEC;
   read_log[read_log_i] = duration;
-  strcpy(read_ids[read_log_i], buf->object_id);
+  memcpy(read_ids[read_log_i], buf->object_id.id, UNIQUE_ID_SIZE);
   read_log_i += 1;
 
   int err;
@@ -697,7 +710,7 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
     /* If the cursor is equal to the full object size, reset the cursor and
      * we're done. */
     if (conn->cursor == buf->data_size + buf->metadata_size) {
-      dump_logs("pm_reads.txt", read_log, read_ids);
+      dump_logs((char*) "pm_reads.txt", read_log, read_ids);
       ClientConnection_finish_request(conn);
     }
     err = 0;
