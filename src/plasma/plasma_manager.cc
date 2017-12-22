@@ -540,6 +540,32 @@ void process_message(event_loop *loop,
                      void *context,
                      int events);
 
+
+const uint LOG_SIZE = 1000000;
+
+uint write_log_i = 0;
+float write_log[LOG_SIZE] = {0};
+char write_ids[LOG_SIZE][UNIQUE_ID_SIZE];
+
+uint read_log_i = 0;
+float read_log[LOG_SIZE] = {0};
+char read_ids[LOG_SIZE][UNIQUE_ID_SIZE];
+
+void dump_logs(char name[], float arr[], char ids[][UNIQUE_ID_SIZE]) {
+  char filename[1024];
+  sprintf(filename, "/home/ubuntu/%s", name);
+
+  FILE *fp;
+  fp = fopen(filename, "w");
+  for (int i=-1;++i<LOG_SIZE;) {
+    char id_string[ID_STRING_SIZE];
+    ObjectID_to_string(buf->object_id, id_string, ID_STRING_SIZE);
+    fprintf(fp, "%s %f\n", id_string, arr[i]);
+  }
+
+  fclose(fp);
+}
+
 int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   LOG_DEBUG("Writing data to fd %d", conn->fd);
   ssize_t r, s;
@@ -552,7 +578,9 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   int start_time = clock();
   r = write(conn->fd, buf->data + conn->cursor, s);
   double duration = ((double)(clock()-start_time))/CLOCKS_PER_SEC;
-  LOG_ERROR("read", duration)
+  write_log[write_log_i] = duration;
+  strcpy(write_ids[write_log_i], buf->object_id);
+  write_log_i += 1;
 
   int err;
   if (r <= 0) {
@@ -563,6 +591,7 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
     CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
     /* If we've finished writing this buffer, reset the cursor. */
     if (conn->cursor == buf->data_size + buf->metadata_size) {
+      dump_logs("pm_writes.txt", write_log, write_ids);
       LOG_DEBUG("writing on channel %d finished", conn->fd);
       ClientConnection_finish_request(conn);
     }
@@ -654,7 +683,9 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   int start_time = clock();
   r = read(conn->fd, buf->data + conn->cursor, s);
   double duration = ((double)(clock()-start_time))/CLOCKS_PER_SEC;
-  LOG_ERROR("read", duration)
+  read_log[read_log_i] = duration;
+  strcpy(read_ids[read_log_i], buf->object_id);
+  read_log_i += 1;
 
   int err;
   if (r <= 0) {
@@ -666,6 +697,7 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
     /* If the cursor is equal to the full object size, reset the cursor and
      * we're done. */
     if (conn->cursor == buf->data_size + buf->metadata_size) {
+      dump_logs("pm_reads.txt", read_log, read_ids);
       ClientConnection_finish_request(conn);
     }
     err = 0;
