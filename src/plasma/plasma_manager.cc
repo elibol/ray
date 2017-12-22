@@ -576,7 +576,7 @@ void dump_logs(char name[], float arr[], unsigned char ids[][UNIQUE_ID_SIZE]) {
     }
     char id_string[ID_STRING_SIZE];
     id_to_str(ids[i], id_string, ID_STRING_SIZE);
-    fprintf(fp, "%s %f\n", id_string, arr[i]);
+    fprintf(fp, "%s %.10f\n", id_string, arr[i]);
   }
 
   fclose(fp);
@@ -593,7 +593,7 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
 
   int start_time = clock();
   r = write(conn->fd, buf->data + conn->cursor, s);
-  double duration = ((double)(clock()-start_time))/CLOCKS_PER_SEC;
+  float duration = ((float)(clock()-start_time))/CLOCKS_PER_SEC;
   write_log[write_log_i] = duration;
   memcpy(write_ids[write_log_i], buf->object_id.id, UNIQUE_ID_SIZE);
   write_log_i += 1;
@@ -698,7 +698,7 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
 
   int start_time = clock();
   r = read(conn->fd, buf->data + conn->cursor, s);
-  double duration = ((double)(clock()-start_time))/CLOCKS_PER_SEC;
+  float duration = ((float)(clock()-start_time))/CLOCKS_PER_SEC;
   read_log[read_log_i] = duration;
   memcpy(read_ids[read_log_i], buf->object_id.id, UNIQUE_ID_SIZE);
   read_log_i += 1;
