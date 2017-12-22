@@ -547,6 +547,7 @@ unsigned char log_ids[LOG_SIZE][UNIQUE_ID_SIZE];
 char log_op[LOG_SIZE];
 clock_t log_start[LOG_SIZE] = {0};
 clock_t log_end[LOG_SIZE] = {0};
+float log_progress[LOG_SIZE] = {0};
 
 void id_to_str(unsigned char *id, char *id_string, int id_length) {
   CHECK(id_length >= ID_STRING_SIZE);
@@ -573,8 +574,7 @@ void dump_logs() {
     }
     char id_string[ID_STRING_SIZE];
     id_to_str(log_ids[i], id_string, ID_STRING_SIZE);
-    // fprintf(fp, "%s %ld %ld\n", id_string, log_start[i], log_end[i]);
-    fprintf(fp, "%s %c %ld %ld\n", id_string, log_op[i], log_start[i], log_end[i]);
+    fprintf(fp, "%s %c %ld %ld %f \n", id_string, log_op[i], log_start[i], log_end[i], log_progress[i]);
   }
 
   fclose(fp);
@@ -594,6 +594,7 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   log_end[log_i] = clock();
   memcpy(log_ids[log_i], buf->object_id.id, UNIQUE_ID_SIZE);
   log_op[log_i] = 'w';
+  log_progress[log_i] = (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size);
   log_i += 1;
 
   int err;
@@ -610,6 +611,7 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
     }
     err = 0;
   }
+
   return err;
 }
 
@@ -698,6 +700,7 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   log_end[log_i] = clock();
   memcpy(log_ids[log_i], buf->object_id.id, UNIQUE_ID_SIZE);
   log_op[log_i] = 'r';
+  log_progress[log_i] = (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size);
   log_i += 1;
 
   int err;
