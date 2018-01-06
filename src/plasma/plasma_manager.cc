@@ -556,10 +556,11 @@ float log_progress[LOG_SIZE] = {0};
 /**
  * Profile Messaging
  */
+const int MLOG_SIZE = 1000000;
 int mlog_i = 0;
-char mlog_msg[LOG_SIZE][1024];
-clock_t mlog_start[LOG_SIZE] = {0};
-clock_t mlog_end[LOG_SIZE] = {0};
+char mlog_msg[MLOG_SIZE][1024];
+clock_t mlog_start[MLOG_SIZE] = {0};
+clock_t mlog_end[MLOG_SIZE] = {0};
 
 void id_to_str(unsigned char *id, char *id_string, int id_length) {
   CHECK(id_length >= ID_STRING_SIZE);
@@ -572,11 +573,6 @@ void id_to_str(unsigned char *id, char *id_string, int id_length) {
     *buf++ = hex[val & 0xf];
   }
   *buf = '\0';
-}
-
-void dump_logs() {
-  dump_prof();
-  dump_msg();
 }
 
 void dump_prof() {
@@ -601,18 +597,21 @@ void dump_prof() {
 void dump_msg() {
   char filename[1024];
   sprintf(filename, "/home/ubuntu/profile_msg.txt");
-
   FILE *fp;
   fp = fopen(filename, "w");
   fprintf(fp, "msg,start,end\n");
-  for (int i=-1;++i<LOG_SIZE;) {
+  for (int i=-1;++i<MLOG_SIZE;) {
     if(mlog_start[i] == 0){
       break;
     }
     fprintf(fp, "%s,%ld,%ld\n", mlog_msg[i], mlog_start[i], mlog_end[i]);
   }
-
   fclose(fp);
+}
+
+void dump_logs() {
+  dump_prof();
+  dump_msg();
 }
 
 int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
@@ -1505,9 +1504,10 @@ void process_message(event_loop *loop,
   uint8_t *data;
   read_message(client_sock, &type, &length, &data);
 
+  char* msg;
   switch (type) {
   case MessageType_PlasmaDataRequest: {
-    strcpy(mlog_msg[mlog_i], "PlasmaDataRequest");
+    msg = (char*) "PlasmaDataRequest";
     LOG_DEBUG("Processing data request");
     plasma::ObjectID object_id;
     char *address;
@@ -1518,7 +1518,7 @@ void process_message(event_loop *loop,
     free(address);
   } break;
   case MessageType_PlasmaDataReply: {
-    strcpy(mlog_msg[mlog_i], "PlasmaDataReply");
+    msg = (char*) "PlasmaDataReply";
     LOG_DEBUG("Processing data reply");
     plasma::ObjectID object_id;
     int64_t object_size;
@@ -1529,7 +1529,7 @@ void process_message(event_loop *loop,
                          metadata_size, conn);
   } break;
   case MessageType_PlasmaFetchRequest: {
-    strcpy(mlog_msg[mlog_i], "PlasmaFetchRequest");
+    msg = (char*) "PlasmaFetchRequest";
     LOG_DEBUG("Processing fetch remote");
     std::vector<plasma::ObjectID> object_ids_to_fetch;
     /* TODO(pcm): process_fetch_requests allocates an array of num_objects
@@ -1539,7 +1539,7 @@ void process_message(event_loop *loop,
                            object_ids_to_fetch.data());
   } break;
   case MessageType_PlasmaWaitRequest: {
-    strcpy(mlog_msg[mlog_i], "PlasmaWaitRequest");
+    msg = (char*) "PlasmaWaitRequest";
     LOG_DEBUG("Processing wait");
     plasma::ObjectRequestMap object_requests;
     int64_t timeout_ms;
@@ -1550,20 +1550,20 @@ void process_message(event_loop *loop,
                          num_ready_objects);
   } break;
   case MessageType_PlasmaStatusRequest: {
-    strcpy(mlog_msg[mlog_i], "PlasmaStatusRequest");
+    msg = (char*) "PlasmaStatusRequest";
     LOG_DEBUG("Processing status");
     plasma::ObjectID object_id;
     ARROW_CHECK_OK(plasma::ReadStatusRequest(data, length, &object_id, 1));
     process_status_request(conn, object_id);
   } break;
   case DISCONNECT_CLIENT: {
-    strcpy(mlog_msg[mlog_i], "DISCONNECT_CLIENT");
+    msg = (char*) "DISCONNECT_CLIENT";
     LOG_DEBUG("Disconnecting client on fd %d", client_sock);
     event_loop_remove_file(loop, client_sock);
     ClientConnection_free(conn);
   } break;
   default:
-    strcpy(mlog_msg[mlog_i], "DEFAULT");
+    msg = (char*) "DEFAULT";
     LOG_FATAL("invalid request %" PRId64, type);
   }
   free(data);
@@ -1577,6 +1577,7 @@ void process_message(event_loop *loop,
              type, end_time - start_time);
   }
   mlog_end[mlog_i] = clock();
+  memcpy(mlog_msg[mlog_i], msg, 1024);
   mlog_i += 1;
 }
 
