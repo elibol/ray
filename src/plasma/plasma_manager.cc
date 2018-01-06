@@ -541,6 +541,10 @@ void process_message(event_loop *loop,
                      int events);
 
 
+/**
+ * Profile Send/Receive
+ */
+
 const int LOG_SIZE = 10000000;
 int log_i = 0;
 unsigned char log_ids[LOG_SIZE][UNIQUE_ID_SIZE];
@@ -548,6 +552,14 @@ char log_op[LOG_SIZE];
 clock_t log_start[LOG_SIZE] = {0};
 clock_t log_end[LOG_SIZE] = {0};
 float log_progress[LOG_SIZE] = {0};
+
+/**
+ * Profile Messaging
+ */
+int mlog_i = 0;
+char mlog_msg[LOG_SIZE][1024];
+clock_t mlog_start[LOG_SIZE] = {0};
+clock_t mlog_end[LOG_SIZE] = {0};
 
 void id_to_str(unsigned char *id, char *id_string, int id_length) {
   CHECK(id_length >= ID_STRING_SIZE);
@@ -563,18 +575,41 @@ void id_to_str(unsigned char *id, char *id_string, int id_length) {
 }
 
 void dump_logs() {
+  dump_prof();
+  dump_msg();
+}
+
+void dump_prof() {
   char filename[1024];
-  sprintf(filename, "/home/ubuntu/profile.txt");
+  sprintf(filename, "/home/ubuntu/profile_transfer.txt");
 
   FILE *fp;
   fp = fopen(filename, "w");
+  fprintf(fp, "oid,op,start,end,progress\n");
   for (int i=-1;++i<LOG_SIZE;) {
     if(log_start[i] == 0){
       break;
     }
     char id_string[ID_STRING_SIZE];
     id_to_str(log_ids[i], id_string, ID_STRING_SIZE);
-    fprintf(fp, "%s %c %ld %ld %f \n", id_string, log_op[i], log_start[i], log_end[i], log_progress[i]);
+    fprintf(fp, "%s,%c,%ld,%ld,%f\n", id_string, log_op[i], log_start[i], log_end[i], log_progress[i]);
+  }
+
+  fclose(fp);
+}
+
+void dump_msg() {
+  char filename[1024];
+  sprintf(filename, "/home/ubuntu/profile_msg.txt");
+
+  FILE *fp;
+  fp = fopen(filename, "w");
+  fprintf(fp, "msg,start,end\n");
+  for (int i=-1;++i<LOG_SIZE;) {
+    if(mlog_start[i] == 0){
+      break;
+    }
+    fprintf(fp, "%s,%ld,%ld\n", mlog_msg[i], mlog_start[i], mlog_end[i]);
   }
 
   fclose(fp);
@@ -1459,6 +1494,8 @@ void process_message(event_loop *loop,
                      int client_sock,
                      void *context,
                      int events) {
+
+  mlog_start[mlog_i] = clock();
   int64_t start_time = current_time_ms();
 
   ClientConnection *conn = (ClientConnection *) context;
@@ -1470,6 +1507,7 @@ void process_message(event_loop *loop,
 
   switch (type) {
   case MessageType_PlasmaDataRequest: {
+    strcpy(mlog_msg[mlog_i], "PlasmaDataRequest");
     LOG_DEBUG("Processing data request");
     plasma::ObjectID object_id;
     char *address;
@@ -1480,6 +1518,7 @@ void process_message(event_loop *loop,
     free(address);
   } break;
   case MessageType_PlasmaDataReply: {
+    strcpy(mlog_msg[mlog_i], "PlasmaDataReply");
     LOG_DEBUG("Processing data reply");
     plasma::ObjectID object_id;
     int64_t object_size;
@@ -1490,6 +1529,7 @@ void process_message(event_loop *loop,
                          metadata_size, conn);
   } break;
   case MessageType_PlasmaFetchRequest: {
+    strcpy(mlog_msg[mlog_i], "PlasmaFetchRequest");
     LOG_DEBUG("Processing fetch remote");
     std::vector<plasma::ObjectID> object_ids_to_fetch;
     /* TODO(pcm): process_fetch_requests allocates an array of num_objects
@@ -1499,6 +1539,7 @@ void process_message(event_loop *loop,
                            object_ids_to_fetch.data());
   } break;
   case MessageType_PlasmaWaitRequest: {
+    strcpy(mlog_msg[mlog_i], "PlasmaWaitRequest");
     LOG_DEBUG("Processing wait");
     plasma::ObjectRequestMap object_requests;
     int64_t timeout_ms;
@@ -1509,17 +1550,20 @@ void process_message(event_loop *loop,
                          num_ready_objects);
   } break;
   case MessageType_PlasmaStatusRequest: {
+    strcpy(mlog_msg[mlog_i], "PlasmaStatusRequest");
     LOG_DEBUG("Processing status");
     plasma::ObjectID object_id;
     ARROW_CHECK_OK(plasma::ReadStatusRequest(data, length, &object_id, 1));
     process_status_request(conn, object_id);
   } break;
   case DISCONNECT_CLIENT: {
+    strcpy(mlog_msg[mlog_i], "DISCONNECT_CLIENT");
     LOG_DEBUG("Disconnecting client on fd %d", client_sock);
     event_loop_remove_file(loop, client_sock);
     ClientConnection_free(conn);
   } break;
   default:
+    strcpy(mlog_msg[mlog_i], "DEFAULT");
     LOG_FATAL("invalid request %" PRId64, type);
   }
   free(data);
@@ -1532,6 +1576,8 @@ void process_message(event_loop *loop,
              " milliseconds.",
              type, end_time - start_time);
   }
+  mlog_end[mlog_i] = clock();
+  mlog_i += 1;
 }
 
 int heartbeat_handler(event_loop *loop, timer_id id, void *context) {
