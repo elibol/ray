@@ -668,10 +668,14 @@ void send_queued_request(event_loop *loop,
   int err = 0;
   switch (buf->type) {
   case MessageType_PlasmaDataRequest:
+    mlog_start[mlog_i] = clock();
     err = handle_sigpipe(
         plasma::SendDataRequest(conn->fd, buf->object_id.to_plasma_id(),
                                 state->addr, state->port),
         conn->fd);
+    mlog_end[mlog_i] = clock();
+    memcpy(mlog_msg[mlog_i], "SND_PlasmaDataRequest", 1024);
+    mlog_i += 1;
     break;
   case MessageType_PlasmaDataReply:
     LOG_DEBUG("Transferring object to manager");
@@ -967,6 +971,7 @@ void process_data_request(event_loop *loop,
 
 void request_transfer_from(PlasmaManagerState *manager_state,
                            FetchRequest *fetch_req) {
+  mlog_start[mlog_i] = clock();
   CHECK(fetch_req->manager_vector.size() > 0);
   CHECK(fetch_req->next_manager >= 0 &&
         static_cast<size_t>(fetch_req->next_manager) <
@@ -1007,6 +1012,10 @@ void request_transfer_from(PlasmaManagerState *manager_state,
   /* On the next attempt, try the next manager in manager_vector. */
   fetch_req->next_manager += 1;
   fetch_req->next_manager %= fetch_req->manager_vector.size();
+
+  mlog_end[mlog_i] = clock();
+  memcpy(mlog_msg[mlog_i], "QUE_PlasmaDataRequest", 1024);
+  mlog_i += 1;
 }
 
 int fetch_timeout_handler(event_loop *loop, timer_id id, void *context) {
@@ -1507,7 +1516,7 @@ void process_message(event_loop *loop,
   char* msg;
   switch (type) {
   case MessageType_PlasmaDataRequest: {
-    msg = (char*) "PlasmaDataRequest";
+    msg = (char*) "RCV_PlasmaDataRequest";
     LOG_DEBUG("Processing data request");
     plasma::ObjectID object_id;
     char *address;
@@ -1518,7 +1527,7 @@ void process_message(event_loop *loop,
     free(address);
   } break;
   case MessageType_PlasmaDataReply: {
-    msg = (char*) "PlasmaDataReply";
+    msg = (char*) "RCV_PlasmaDataReply";
     LOG_DEBUG("Processing data reply");
     plasma::ObjectID object_id;
     int64_t object_size;
@@ -1529,7 +1538,7 @@ void process_message(event_loop *loop,
                          metadata_size, conn);
   } break;
   case MessageType_PlasmaFetchRequest: {
-    msg = (char*) "PlasmaFetchRequest";
+    msg = (char*) "RCV_PlasmaFetchRequest";
     LOG_DEBUG("Processing fetch remote");
     std::vector<plasma::ObjectID> object_ids_to_fetch;
     /* TODO(pcm): process_fetch_requests allocates an array of num_objects
@@ -1539,7 +1548,7 @@ void process_message(event_loop *loop,
                            object_ids_to_fetch.data());
   } break;
   case MessageType_PlasmaWaitRequest: {
-    msg = (char*) "PlasmaWaitRequest";
+    msg = (char*) "RCV_PlasmaWaitRequest";
     LOG_DEBUG("Processing wait");
     plasma::ObjectRequestMap object_requests;
     int64_t timeout_ms;
@@ -1550,7 +1559,7 @@ void process_message(event_loop *loop,
                          num_ready_objects);
   } break;
   case MessageType_PlasmaStatusRequest: {
-    msg = (char*) "PlasmaStatusRequest";
+    msg = (char*) "RCV_PlasmaStatusRequest";
     LOG_DEBUG("Processing status");
     plasma::ObjectID object_id;
     ARROW_CHECK_OK(plasma::ReadStatusRequest(data, length, &object_id, 1));
