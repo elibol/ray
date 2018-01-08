@@ -555,12 +555,12 @@ struct Profile {
     clock_t e[SIZE] = {0};
 
     // transfers
-    unsigned char oid[SIZE][UNIQUE_ID_SIZE];
+    unsigned char *oid[SIZE];
     char op[SIZE];
     float progress[SIZE] = {0};
 
     // other
-    char label[SIZE][LABEL_SIZE];
+    const char *label[SIZE];
 
     void id_to_str(unsigned char *id, char *id_string, int id_length) {
       CHECK(id_length >= ID_STRING_SIZE);
@@ -587,20 +587,15 @@ struct Profile {
     void end(char op, unsigned char *oid, float progress){
       this->e[this->i] = clock();
       this->op[this->i] = op;
-      memcpy(this->oid[this->i], oid, UNIQUE_ID_SIZE);
+      this->oid[this->i] = oid;
       this->progress[this->i] = progress;
-      // empty
-      *this->label[this->i] = '\0';
       this->i += 1;
     }
 
     void end(const char *label, char op='f'){
       this->e[this->i] = clock();
       this->op[this->i] = op;
-      memcpy(this->label[this->i], label, LABEL_SIZE);
-      //empty
-      *this->oid[this->i] = '\0';
-      this->progress[this->i] = -1;
+      this->label[this->i] = label;
       this->i += 1;
     }
 
@@ -616,14 +611,19 @@ struct Profile {
       fp = fopen(filename, "w");
       fprintf(fp, "op,start,end,oid,progress,label\n");
       char oid[ID_STRING_SIZE];
+      bool is_transfer;
+      float progress;
       for (int i=-1;++i<this->i;) {
+        progress = -1;
         *oid = '\0';
-        if(this->op[i] == 'r' || this->op[i] == 'w'){
+        is_transfer = this->op[i] == 'r' || this->op[i] == 'w';
+        if(is_transfer){
           this->id_to_str(this->oid[i], oid, ID_STRING_SIZE);
+          progress = this->progress[i];
         }
         fprintf(fp, "%c,%ld,%ld,%s,%f,%s\n",
                 this->op[i], this->s[i], this->e[i],
-                oid, this->progress[i], this->label[i]);
+                oid, progress, is_transfer? '\0':this->label[i]);
       }
       fclose(fp);
     }
