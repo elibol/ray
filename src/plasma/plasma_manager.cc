@@ -542,77 +542,94 @@ void process_message(event_loop *loop,
 
 
 /**
- * Profile Send/Receive
+ * Profiler
  */
 
-const int LOG_SIZE = 10000000;
-int log_i = 0;
-unsigned char log_ids[LOG_SIZE][UNIQUE_ID_SIZE];
-char log_op[LOG_SIZE];
-clock_t log_start[LOG_SIZE] = {0};
-clock_t log_end[LOG_SIZE] = {0};
-float log_progress[LOG_SIZE] = {0};
+struct Profile {
 
-/**
- * Profile Messaging
- */
-const int MLOG_SIZE = 1000000;
-int mlog_i = 0;
-char mlog_msg[MLOG_SIZE][1024];
-clock_t mlog_start[MLOG_SIZE] = {0};
-clock_t mlog_end[MLOG_SIZE] = {0};
+  private:
+    static const int SIZE = 10000000;
+    static const int LABEL_SIZE = 64;
+    int i = 0;
+    clock_t s[SIZE] = {0};
+    clock_t e[SIZE] = {0};
 
-void id_to_str(unsigned char *id, char *id_string, int id_length) {
-  CHECK(id_length >= ID_STRING_SIZE);
-  static const char hex[] = "0123456789abcdef";
-  char *buf = id_string;
+    // transfers
+    unsigned char oid[SIZE][UNIQUE_ID_SIZE];
+    char op[SIZE];
+    float progress[SIZE] = {0};
 
-  for (int i = 0; i < UNIQUE_ID_SIZE; i++) {
-    unsigned int val = id[i];
-    *buf++ = hex[val >> 4];
-    *buf++ = hex[val & 0xf];
-  }
-  *buf = '\0';
-}
+    // other
+    char label[SIZE][LABEL_SIZE];
 
-void dump_prof() {
-  char filename[1024];
-  sprintf(filename, "/home/ubuntu/profile_transfer.txt");
-
-  FILE *fp;
-  fp = fopen(filename, "w");
-  fprintf(fp, "oid,op,start,end,progress\n");
-  for (int i=-1;++i<LOG_SIZE;) {
-    if(log_start[i] == 0){
-      break;
+    void id_to_str(unsigned char *id, char *id_string, int id_length) {
+      CHECK(id_length >= ID_STRING_SIZE);
+      static const char hex[] = "0123456789abcdef";
+      char *buf = id_string;
+      for (int i = 0; i < UNIQUE_ID_SIZE; i++) {
+        unsigned int val = id[i];
+        *buf++ = hex[val >> 4];
+        *buf++ = hex[val & 0xf];
+      }
+      *buf = '\0';
     }
-    char id_string[ID_STRING_SIZE];
-    id_to_str(log_ids[i], id_string, ID_STRING_SIZE);
-    fprintf(fp, "%s,%c,%ld,%ld,%f\n", id_string, log_op[i], log_start[i], log_end[i], log_progress[i]);
-  }
 
-  fclose(fp);
-}
+  public:
 
-void dump_msg() {
-  char filename[1024];
-  sprintf(filename, "/home/ubuntu/profile_msg.txt");
-  FILE *fp;
-  fp = fopen(filename, "w");
-  fprintf(fp, "msg,start,end\n");
-  for (int i=-1;++i<MLOG_SIZE;) {
-    if(mlog_start[i] == 0){
-      break;
+    void start(){
+      // push an existing start clock time to next entry
+      // this allows for single-level nesting
+      // note that this results in ordering by end time
+      this->s[this->i+1] = this->s[this->i];
+      this->s[this->i] = clock();
     }
-    fprintf(fp, "%s,%ld,%ld\n", mlog_msg[i], mlog_start[i], mlog_end[i]);
-  }
-  fclose(fp);
-}
 
-void dump_logs() {
-  dump_prof();
-  dump_msg();
-}
+    void end(char op, unsigned char *oid, float progress){
+      this->e[this->i] = clock();
+      this->op[this->i] = op;
+      memcpy(this->oid[this->i], oid, UNIQUE_ID_SIZE);
+      this->progress[this->i] = progress;
+      // empty
+      *this->label[this->i] = '\0';
+      this->i += 1;
+    }
+
+    void end(const char *label, char op='f'){
+      this->e[this->i] = clock();
+      this->op[this->i] = op;
+      memcpy(this->label[this->i], label, LABEL_SIZE);
+      //empty
+      *this->oid[this->i] = '\0';
+      this->progress[this->i] = -1;
+      this->i += 1;
+    }
+
+    void event(const char *label){
+      this->start();
+      this->end(label, 'e');
+    }
+
+    void dump_logs() {
+      char filename[1024];
+      sprintf(filename, "/home/ubuntu/profile.txt");
+      FILE *fp;
+      fp = fopen(filename, "w");
+      fprintf(fp, "op,start,end,oid,progress,label\n");
+      char oid[ID_STRING_SIZE];
+      for (int i=-1;++i<this->i;) {
+        *oid = '\0';
+        if(this->op[i] == 'r' || this->op[i] == 'w'){
+          this->id_to_str(this->oid[i], oid, ID_STRING_SIZE);
+        }
+        fprintf(fp, "%c,%ld,%ld,%s,%f,%s\n",
+                this->op[i], this->s[i], this->e[i],
+                oid, this->progress[i], this->label[i]);
+      }
+      fclose(fp);
+    }
+
+} profile;
+
 
 int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   LOG_DEBUG("Writing data to fd %d", conn->fd);
@@ -622,14 +639,10 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   if (s > RayConfig::instance().buf_size()) {
     s = RayConfig::instance().buf_size();
   }
-  
-  log_start[log_i] = clock();
+
+  profile.start();
   r = write(conn->fd, buf->data + conn->cursor, s);
-  log_end[log_i] = clock();
-  memcpy(log_ids[log_i], buf->object_id.id, UNIQUE_ID_SIZE);
-  log_op[log_i] = 'w';
-  log_progress[log_i] = (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size);
-  log_i += 1;
+  profile.end('w', buf->object_id.id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
 
   int err;
   if (r <= 0) {
@@ -653,6 +666,7 @@ void send_queued_request(event_loop *loop,
                          int data_sock,
                          void *context,
                          int events) {
+  profile.start();
   ClientConnection *conn = (ClientConnection *) context;
   PlasmaManagerState *state = conn->manager_state;
 
@@ -661,6 +675,7 @@ void send_queued_request(event_loop *loop,
      * from the event loop. It will be reawoken when we receive another
      * data request. */
     event_loop_remove_file(loop, conn->fd);
+    profile.end("send_queued_request_EMPTY");
     return;
   }
 
@@ -668,14 +683,11 @@ void send_queued_request(event_loop *loop,
   int err = 0;
   switch (buf->type) {
   case MessageType_PlasmaDataRequest:
-    mlog_start[mlog_i] = clock();
     err = handle_sigpipe(
         plasma::SendDataRequest(conn->fd, buf->object_id.to_plasma_id(),
                                 state->addr, state->port),
         conn->fd);
-    mlog_end[mlog_i] = clock();
-    memcpy(mlog_msg[mlog_i], "SND_PlasmaDataRequest", 1024);
-    mlog_i += 1;
+    profile.event("SND_PlasmaDataRequest");
     break;
   case MessageType_PlasmaDataReply:
     LOG_DEBUG("Transferring object to manager");
@@ -720,6 +732,7 @@ void send_queued_request(event_loop *loop,
     conn->transfer_queue.pop_front();
     delete buf;
   }
+  profile.end("send_queued_request");
 }
 
 int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
@@ -733,13 +746,9 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
     s = RayConfig::instance().buf_size();
   }
 
-  log_start[log_i] = clock();
+  profile.start();
   r = read(conn->fd, buf->data + conn->cursor, s);
-  log_end[log_i] = clock();
-  memcpy(log_ids[log_i], buf->object_id.id, UNIQUE_ID_SIZE);
-  log_op[log_i] = 'r';
-  log_progress[log_i] = (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size);
-  log_i += 1;
+  profile.end('r', buf->object_id.id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
 
   int err;
   if (r <= 0) {
@@ -762,6 +771,7 @@ void process_data_chunk(event_loop *loop,
                         int data_sock,
                         void *context,
                         int events) {
+  profile.start();
   /* Read the object chunk. */
   ClientConnection *conn = (ClientConnection *) context;
   PlasmaRequestBuffer *buf = conn->transfer_queue.front();
@@ -796,6 +806,7 @@ void process_data_chunk(event_loop *loop,
       ClientConnection_free(conn);
     }
   }
+  profile.end("process_data_chunk");
 }
 
 void ignore_data_chunk(event_loop *loop,
@@ -904,6 +915,7 @@ void process_transfer_request(event_loop *loop,
   buf->metadata_size = object_buffer.metadata_size;
 
   manager_conn->transfer_queue.push_back(buf);
+  profile.event("QUE_PlasmaDataReply");
   manager_conn->pending_object_transfers[object_id] = buf;
 }
 
@@ -971,7 +983,6 @@ void process_data_request(event_loop *loop,
 
 void request_transfer_from(PlasmaManagerState *manager_state,
                            FetchRequest *fetch_req) {
-  mlog_start[mlog_i] = clock();
   CHECK(fetch_req->manager_vector.size() > 0);
   CHECK(fetch_req->next_manager >= 0 &&
         static_cast<size_t>(fetch_req->next_manager) <
@@ -1007,18 +1018,16 @@ void request_transfer_from(PlasmaManagerState *manager_state,
     }
     /* Add this transfer request to this connection's transfer queue. */
     manager_conn->transfer_queue.push_back(transfer_request);
+    profile.event("QUE_PlasmaDataRequest");
   }
 
   /* On the next attempt, try the next manager in manager_vector. */
   fetch_req->next_manager += 1;
   fetch_req->next_manager %= fetch_req->manager_vector.size();
-
-  mlog_end[mlog_i] = clock();
-  memcpy(mlog_msg[mlog_i], "QUE_PlasmaDataRequest", 1024);
-  mlog_i += 1;
 }
 
 int fetch_timeout_handler(event_loop *loop, timer_id id, void *context) {
+  profile.start();
   PlasmaManagerState *manager_state = (PlasmaManagerState *) context;
 
   /* Allocate a vector of object IDs to resend requests for location
@@ -1054,6 +1063,7 @@ int fetch_timeout_handler(event_loop *loop, timer_id id, void *context) {
   }
   free(object_ids_to_request);
 
+  profile.end("fetch_timeout_handler", 't');
   /* Wait at least manager_timeout_milliseconds before running this timeout
    * handler again. But if we're waiting for a large number of objects, wait
    * longer (e.g., 10 seconds for one million objects) so that we don't
@@ -1122,6 +1132,7 @@ void object_table_subscribe_callback(ObjectID object_id,
                                      int64_t data_size,
                                      const std::vector<DBClientID> &manager_ids,
                                      void *context) {
+  profile.start();
   PlasmaManagerState *manager_state = (PlasmaManagerState *) context;
   const std::vector<std::string> managers =
       db_client_table_get_ip_addresses(manager_state->db, manager_ids);
@@ -1134,6 +1145,7 @@ void object_table_subscribe_callback(ObjectID object_id,
   update_object_wait_requests(manager_state, object_id,
                               plasma::PLASMA_QUERY_ANYWHERE,
                               ObjectStatus_Remote);
+  profile.end("object_table_subscribe_callback");
 }
 
 void process_fetch_requests(ClientConnection *client_conn,
@@ -1183,8 +1195,10 @@ void process_fetch_requests(ClientConnection *client_conn,
 }
 
 int wait_timeout_handler(event_loop *loop, timer_id id, void *context) {
+  profile.start();
   WaitRequest *wait_req = (WaitRequest *) context;
   return_from_wait(wait_req->client_conn->manager_state, wait_req);
+  profile.end("wait_timeout_handler", 't');
   return EVENT_LOOP_TIMER_DONE;
 }
 
@@ -1417,6 +1431,7 @@ void process_object_notification(event_loop *loop,
                                  int client_sock,
                                  void *context,
                                  int events) {
+  profile.start();
   PlasmaManagerState *state = (PlasmaManagerState *) context;
   uint8_t *notification = read_message_async(loop, client_sock);
   if (notification == NULL) {
@@ -1436,6 +1451,7 @@ void process_object_notification(event_loop *loop,
         (unsigned char *) object_info->digest()->data());
   }
   free(notification);
+  profile.end("process_object_notification");
 }
 
 /* TODO(pcm): Split this into two methods: new_worker_connection
@@ -1503,7 +1519,7 @@ void process_message(event_loop *loop,
                      void *context,
                      int events) {
 
-  mlog_start[mlog_i] = clock();
+  profile.start();
   int64_t start_time = current_time_ms();
 
   ClientConnection *conn = (ClientConnection *) context;
@@ -1585,12 +1601,11 @@ void process_message(event_loop *loop,
              " milliseconds.",
              type, end_time - start_time);
   }
-  mlog_end[mlog_i] = clock();
-  memcpy(mlog_msg[mlog_i], msg, 1024);
-  mlog_i += 1;
+  profile.end(msg);
 }
 
 int heartbeat_handler(event_loop *loop, timer_id id, void *context) {
+  // profile.start();
   PlasmaManagerState *state = (PlasmaManagerState *) context;
 
   /* Check that the last heartbeat was not sent too long ago. */
@@ -1605,6 +1620,7 @@ int heartbeat_handler(event_loop *loop, timer_id id, void *context) {
   state->previous_heartbeat_time = current_time;
 
   plasma_manager_send_heartbeat(state->db);
+  // profile.end("heartbeat_handler", "t");
   return RayConfig::instance().heartbeat_timeout_milliseconds();
 }
 
@@ -1664,7 +1680,7 @@ void start_server(const char *store_socket_name,
 void signal_handler(int signal) {
   LOG_DEBUG("Signal was %d", signal);
   if (signal == SIGTERM) {
-    dump_logs();
+    profile.dump_logs();
     if (g_manager_state) {
       PlasmaManagerState_free(g_manager_state);
     }
