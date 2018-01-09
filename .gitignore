@@ -135,3 +135,6 @@ build
 /site/Gemfile.lock
 /site/.sass-cache
 /site/_site
+
+.idea
+src/ray/gcs/format/gcs_generated.h
