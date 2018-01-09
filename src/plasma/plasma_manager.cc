@@ -675,7 +675,7 @@ struct Profile {
       float progress;
       for (int i=-1;++i<this->i;) {
         progress = -1;
-        *oid = '\0';
+        oid[0] = '\0';
         is_transfer = this->op[i] == 'r' || this->op[i] == 'w';
         if(is_transfer){
           this->id_to_str(this->oid[i], oid, ID_STRING_SIZE);
@@ -683,7 +683,7 @@ struct Profile {
         }
         fprintf(fp, "%c,%ld,%ld,%s,%f,%s\n",
                 this->op[i], this->s[i], this->e[i],
-                oid, progress, is_transfer? '\0':this->label[i]);
+                oid, progress, is_transfer? "":this->label[i]);
       }
       fclose(fp);
     }
@@ -696,9 +696,11 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   ssize_t r, s;
   /* Try to write one buf_size at a time. */
   s = buf->data_size + buf->metadata_size - conn->cursor;
+  /*
   if (s > RayConfig::instance().buf_size()) {
     s = RayConfig::instance().buf_size();
   }
+  */
 
   profile.start();
   // just an ack to kick things off
@@ -806,9 +808,11 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   CHECK(buf != NULL);
   /* Try to read one buf_size at a time. */
   s = buf->data_size + buf->metadata_size - conn->cursor;
+  /*
   if (s > RayConfig::instance().buf_size()) {
     s = RayConfig::instance().buf_size();
   }
+  */
 
   profile.start();
   // just an ack to kick things off
