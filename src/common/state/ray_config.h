@@ -83,7 +83,7 @@ class RayConfig {
  private:
   RayConfig()
       : ray_protocol_version_(0x0000000000000000),
-        heartbeat_timeout_milliseconds_(100),
+        heartbeat_timeout_milliseconds_(100*1000),
         num_heartbeats_timeout_(100),
         get_timeout_milliseconds_(1000),
         worker_get_request_size_(10000),
@@ -96,8 +96,8 @@ class RayConfig {
         max_num_to_reconstruct_(10000),
         local_scheduler_fetch_request_size_(10000),
         kill_worker_timeout_milliseconds_(100),
-        manager_timeout_milliseconds_(1000),
-        buf_size_(4096),
+        manager_timeout_milliseconds_(1000*1000),
+        buf_size_(4096*1000*4),
         max_time_for_handler_milliseconds_(1000),
         size_limit_(100),
         num_elements_limit_(1000),
