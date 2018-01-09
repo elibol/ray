@@ -140,12 +140,14 @@ void send_queued_request(event_loop *loop,
  * @param loop This is the event loop of the plasma manager.
  * @param listener_socket The socket the plasma manager is listening on.
  * @param context The plasma manager state.
+ * @param conn_type Whether this is a local or remote connection.
  * @return Void.
  */
 ClientConnection *ClientConnection_listen(event_loop *loop,
                                           int listener_sock,
                                           void *context,
-                                          int events);
+                                          int events,
+                                          char conn_type);
 
 /**
  * The following definitions are internal to the plasma manager code but are
