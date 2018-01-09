@@ -699,9 +699,9 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   }
 
   profile.start();
-  // r = write(conn->fd, buf->data + conn->cursor, s);
   while(s != 0){
-    r = write(conn->transfer_sock, buf->data + conn->cursor, s);
+    r = write(conn->fd, buf->data + conn->cursor, s);
+    // r = write(conn->transfer_sock, buf->data + conn->cursor, s);
     if (r <= 0) {
       LOG_ERROR("Write error");
       return errno;
@@ -805,9 +805,9 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   }
 
   profile.start();
-  // r = read(conn->fd, buf->data + conn->cursor, s);
   while(s != 0){
-    r = read(conn->transfer_sock, buf->data + conn->cursor, s);
+    r = read(conn->fd, buf->data + conn->cursor, s);
+    // r = read(conn->transfer_sock, buf->data + conn->cursor, s);
     if (r <= 0) {
         LOG_ERROR("Read error");
         return errno;
@@ -912,8 +912,11 @@ ClientConnection *get_manager_connection(PlasmaManagerState *state,
     }
 
     manager_conn = ClientConnection_init(state, fd, ip_addr_port);
+    usleep(1000*1000);
+    LOG_ERROR("Client Connect Start %s", ip_addr);
     manager_conn->transfer_client.init(ip_addr, 5005);
     manager_conn->transfer_sock = manager_conn->transfer_client.sock;
+    LOG_ERROR("Client Connect End");
   } else {
     manager_conn = cc_it->second;
   }
@@ -1546,8 +1549,10 @@ ClientConnection *ClientConnection_listen(event_loop *loop,
   snprintf(client_key, sizeof(client_key), "%d", new_socket);
   ClientConnection *conn = ClientConnection_init(state, new_socket, client_key);
   if(conn_type == 'r'){
+    LOG_ERROR("Server Connect Start");
     conn->transfer_server.init(5005);
     conn->transfer_sock = conn->transfer_server.sock;
+    LOG_ERROR("Server Connect End");
   }
 
   event_loop_add_file(loop, new_socket, EVENT_LOOP_READ, process_message, conn);
