@@ -253,7 +253,8 @@ struct TransferServer {
     uint16_t port;
 
     TransferServer(){};
-    void init(uint16_t port){
+  
+    int init(uint16_t port){
         this->addrlen = sizeof(this->address);
         this->port = port;
         this->server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -264,6 +265,7 @@ struct TransferServer {
         bind(this->server_fd, (struct sockaddr *)&(this->address), sizeof(this->address));
         listen(this->server_fd, 3);
         this->sock = accept(this->server_fd, (struct sockaddr *)&(this->address), (socklen_t*)&(this->addrlen));
+	return this->sock;
     }
 
 };
@@ -274,12 +276,12 @@ struct TransferClient {
     int sock = 0;
     struct sockaddr_in serv_addr;
 
-    char ip[10];
+    char ip[16];
     uint16_t port;
 
     TransferClient(){};
 
-    void init(const char *ip, uint16_t port){
+    int init(const char *ip, uint16_t port){
         strcpy(this->ip, ip);
         this->port = port;
         this->sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -287,7 +289,7 @@ struct TransferClient {
         this->serv_addr.sin_family = AF_INET;
         this->serv_addr.sin_port = htons(this->port);
         inet_pton(AF_INET, this->ip, &(this->serv_addr.sin_addr));
-        connect(this->sock, (struct sockaddr *)&(this->serv_addr), sizeof(this->serv_addr));
+        return connect(this->sock, (struct sockaddr *)&(this->serv_addr), sizeof(this->serv_addr));
     }
 
 };
@@ -699,9 +701,13 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   }
 
   profile.start();
+  // just an ack to kick things off
+  int ack[1] = {14};
+  // LOG_ERROR("Write ack %d", ack[0]);
+  r = write(conn->fd, ack, 1);
   while(s != 0){
-    r = write(conn->fd, buf->data + conn->cursor, s);
-    // r = write(conn->transfer_sock, buf->data + conn->cursor, s);
+    // r = write(conn->fd, buf->data + conn->cursor, s);
+    r = write(conn->transfer_sock, buf->data + conn->cursor, s);
     if (r <= 0) {
       LOG_ERROR("Write error");
       return errno;
@@ -805,9 +811,13 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   }
 
   profile.start();
+  // just an ack to kick things off
+  int ack[1] = {0};
+  r = read(conn->fd, ack, 1);
+  // LOG_ERROR("Read ack %d", ack[0]);
   while(s != 0){
-    r = read(conn->fd, buf->data + conn->cursor, s);
-    // r = read(conn->transfer_sock, buf->data + conn->cursor, s);
+    // r = read(conn->fd, buf->data + conn->cursor, s);
+    r = read(conn->transfer_sock, buf->data + conn->cursor, s);
     if (r <= 0) {
         LOG_ERROR("Read error");
         return errno;
@@ -912,11 +922,15 @@ ClientConnection *get_manager_connection(PlasmaManagerState *state,
     }
 
     manager_conn = ClientConnection_init(state, fd, ip_addr_port);
-    usleep(1000*1000);
-    LOG_ERROR("Client Connect Start %s", ip_addr);
-    manager_conn->transfer_client.init(ip_addr, 5005);
-    manager_conn->transfer_sock = manager_conn->transfer_client.sock;
-    LOG_ERROR("Client Connect End");
+    usleep(1000);
+    // LOG_ERROR("TransferClient Connect Start %s", ip_addr);
+    int success = manager_conn->transfer_client.init(ip_addr, 5005);
+    if(success == -1){
+      LOG_ERROR("TransferClient Connect Failed");
+    } else {
+      manager_conn->transfer_sock = manager_conn->transfer_client.sock;
+      // LOG_ERROR("TransferClient Connect End");
+    }
   } else {
     manager_conn = cc_it->second;
   }
@@ -1549,10 +1563,14 @@ ClientConnection *ClientConnection_listen(event_loop *loop,
   snprintf(client_key, sizeof(client_key), "%d", new_socket);
   ClientConnection *conn = ClientConnection_init(state, new_socket, client_key);
   if(conn_type == 'r'){
-    LOG_ERROR("Server Connect Start");
-    conn->transfer_server.init(5005);
-    conn->transfer_sock = conn->transfer_server.sock;
-    LOG_ERROR("Server Connect End");
+    // LOG_ERROR("TransferServer Connect Start");
+    int success = conn->transfer_server.init(5005);
+    if(success == -1){
+      LOG_ERROR("TransferServer Connect Failed");
+    } else {
+      conn->transfer_sock = conn->transfer_server.sock;
+      // LOG_ERROR("TransferServer Connect End");
+    }
   }
 
   event_loop_add_file(loop, new_socket, EVENT_LOOP_READ, process_message, conn);
