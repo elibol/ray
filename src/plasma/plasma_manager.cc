@@ -631,7 +631,8 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
 
   profile.start();
   r = write(conn->fd, buf->data + conn->cursor, s);
-  profile.end('w', buf->object_id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
+  profile.end('w', buf->object_id, -1);
+  // profile.end('w', buf->object_id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
 
   int err;
   if (r <= 0) {
@@ -737,7 +738,8 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
 
   profile.start();
   r = read(conn->fd, buf->data + conn->cursor, s);
-  profile.end('r', buf->object_id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
+  profile.end('r', buf->object_id, -1);
+  // profile.end('r', buf->object_id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
 
   int err;
   if (r <= 0) {
