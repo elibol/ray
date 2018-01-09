@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 #include <time.h>
+#include <arpa/inet.h>
 
 /* C++ includes. */
 #include <list>
@@ -240,6 +241,58 @@ struct PlasmaManagerState {
 
 PlasmaManagerState *g_manager_state = NULL;
 
+
+struct TransferServer {
+
+    int sock = 0;
+    int opt = 1;
+    int server_fd;
+    struct sockaddr_in address;
+    int addrlen;
+
+    uint16_t port;
+
+    TransferServer(){};
+    void init(uint16_t port){
+        this->addrlen = sizeof(this->address);
+        this->port = port;
+        this->server_fd = socket(AF_INET, SOCK_STREAM, 0);
+        setsockopt(this->server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &(this->opt), sizeof(this->opt));
+        this->address.sin_family = AF_INET;
+        this->address.sin_addr.s_addr = INADDR_ANY;
+        this->address.sin_port = htons( this->port );
+        bind(this->server_fd, (struct sockaddr *)&(this->address), sizeof(this->address));
+        listen(this->server_fd, 3);
+        this->sock = accept(this->server_fd, (struct sockaddr *)&(this->address), (socklen_t*)&(this->addrlen));
+    }
+
+};
+
+
+struct TransferClient {
+
+    int sock = 0;
+    struct sockaddr_in serv_addr;
+
+    char ip[10];
+    uint16_t port;
+
+    TransferClient(){};
+
+    void init(const char *ip, uint16_t port){
+        strcpy(this->ip, ip);
+        this->port = port;
+        this->sock = socket(AF_INET, SOCK_STREAM, 0);
+        memset(&(this->serv_addr), '0', sizeof(this->serv_addr));
+        this->serv_addr.sin_family = AF_INET;
+        this->serv_addr.sin_port = htons(this->port);
+        inet_pton(AF_INET, this->ip, &(this->serv_addr.sin_addr));
+        connect(this->sock, (struct sockaddr *)&(this->serv_addr), sizeof(this->serv_addr));
+    }
+
+};
+
+
 /* Context for a client connection to another plasma manager. */
 struct ClientConnection {
   /** Current state for this plasma manager. This is shared
@@ -269,6 +322,11 @@ struct ClientConnection {
    * identifies the plasma manager that we're connected to. We will use the
    * string <address>:<port> as an identifier. */
   std::string ip_addr_port;
+
+  TransferClient transfer_client;
+  TransferServer transfer_server;
+  int transfer_sock;
+
 };
 
 /**
@@ -641,25 +699,25 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   }
 
   profile.start();
-  r = write(conn->fd, buf->data + conn->cursor, s);
-  profile.end('w', buf->object_id.id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
-
-  int err;
-  if (r <= 0) {
-    LOG_ERROR("Write error");
-    err = errno;
-  } else {
-    conn->cursor += r;
-    CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
-    /* If we've finished writing this buffer, reset the cursor. */
-    if (conn->cursor == buf->data_size + buf->metadata_size) {
-      LOG_DEBUG("writing on channel %d finished", conn->fd);
-      ClientConnection_finish_request(conn);
+  // r = write(conn->fd, buf->data + conn->cursor, s);
+  while(s != 0){
+    r = write(conn->transfer_sock, buf->data + conn->cursor, s);
+    if (r <= 0) {
+      LOG_ERROR("Write error");
+      return errno;
     }
-    err = 0;
+    conn->cursor += r;
+    s = buf->data_size + buf->metadata_size - conn->cursor;
   }
+  profile.end('w', buf->object_id.id, -1);
 
-  return err;
+  CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
+  /* If we've finished writing this buffer, reset the cursor. */
+  if (conn->cursor == buf->data_size + buf->metadata_size) {
+    LOG_DEBUG("writing on channel %d finished", conn->fd);
+    ClientConnection_finish_request(conn);
+  }
+  return 0;
 }
 
 void send_queued_request(event_loop *loop,
@@ -747,24 +805,25 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   }
 
   profile.start();
-  r = read(conn->fd, buf->data + conn->cursor, s);
-  profile.end('r', buf->object_id.id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
-
-  int err;
-  if (r <= 0) {
-    LOG_ERROR("Read error");
-    err = errno;
-  } else {
-    conn->cursor += r;
-    CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
-    /* If the cursor is equal to the full object size, reset the cursor and
-     * we're done. */
-    if (conn->cursor == buf->data_size + buf->metadata_size) {
-      ClientConnection_finish_request(conn);
+  // r = read(conn->fd, buf->data + conn->cursor, s);
+  while(s != 0){
+    r = read(conn->transfer_sock, buf->data + conn->cursor, s);
+    if (r <= 0) {
+        LOG_ERROR("Read error");
+        return errno;
     }
-    err = 0;
+    conn->cursor += r;
+    s = buf->data_size + buf->metadata_size - conn->cursor;
   }
-  return err;
+  profile.end('r', buf->object_id.id, -1);
+
+  CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
+  /* If the cursor is equal to the full object size, reset the cursor and
+  * we're done. */
+  if (conn->cursor == buf->data_size + buf->metadata_size) {
+    ClientConnection_finish_request(conn);
+  }
+  return 0;
 }
 
 void process_data_chunk(event_loop *loop,
@@ -839,6 +898,7 @@ void ignore_data_chunk(event_loop *loop,
 ClientConnection *get_manager_connection(PlasmaManagerState *state,
                                          const char *ip_addr,
                                          int port) {
+  // CLIENT
   /* TODO(swang): Should probably check whether ip_addr and port belong to us.
    */
   std::string ip_addr_port = std::string(ip_addr) + ":" + std::to_string(port);
@@ -852,6 +912,8 @@ ClientConnection *get_manager_connection(PlasmaManagerState *state,
     }
 
     manager_conn = ClientConnection_init(state, fd, ip_addr_port);
+    manager_conn->transfer_client.init(ip_addr, 5005);
+    manager_conn->transfer_sock = manager_conn->transfer_client.sock;
   } else {
     manager_conn = cc_it->second;
   }
@@ -1476,11 +1538,14 @@ ClientConnection *ClientConnection_listen(event_loop *loop,
                                           int listener_sock,
                                           void *context,
                                           int events) {
+  // SERVER
   PlasmaManagerState *state = (PlasmaManagerState *) context;
   int new_socket = accept_client(listener_sock);
   char client_key[8];
   snprintf(client_key, sizeof(client_key), "%d", new_socket);
   ClientConnection *conn = ClientConnection_init(state, new_socket, client_key);
+  conn->transfer_server.init(5005);
+  conn->transfer_sock = conn->transfer_server.sock;
 
   event_loop_add_file(loop, new_socket, EVENT_LOOP_READ, process_message, conn);
   LOG_DEBUG("New client connection with fd %d", new_socket);
