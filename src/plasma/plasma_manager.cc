@@ -1537,15 +1537,18 @@ ClientConnection *ClientConnection_init(PlasmaManagerState *state,
 ClientConnection *ClientConnection_listen(event_loop *loop,
                                           int listener_sock,
                                           void *context,
-                                          int events) {
+                                          int events,
+                                          char conn_type) {
   // SERVER
   PlasmaManagerState *state = (PlasmaManagerState *) context;
   int new_socket = accept_client(listener_sock);
   char client_key[8];
   snprintf(client_key, sizeof(client_key), "%d", new_socket);
   ClientConnection *conn = ClientConnection_init(state, new_socket, client_key);
-  conn->transfer_server.init(5005);
-  conn->transfer_sock = conn->transfer_server.sock;
+  if(conn_type == 'r'){
+    conn->transfer_server.init(5005);
+    conn->transfer_sock = conn->transfer_server.sock;
+  }
 
   event_loop_add_file(loop, new_socket, EVENT_LOOP_READ, process_message, conn);
   LOG_DEBUG("New client connection with fd %d", new_socket);
@@ -1568,11 +1571,18 @@ void ClientConnection_free(ClientConnection *client_conn) {
   delete client_conn;
 }
 
-void handle_new_client(event_loop *loop,
-                       int listener_sock,
-                       void *context,
-                       int events) {
-  (void) ClientConnection_listen(loop, listener_sock, context, events);
+void handle_new_local_client(event_loop *loop,
+                             int listener_sock,
+                             void *context,
+                             int events) {
+  (void) ClientConnection_listen(loop, listener_sock, context, events, 'l');
+}
+
+void handle_new_remote_client(event_loop *loop,
+                              int listener_sock,
+                              void *context,
+                              int events) {
+  (void) ClientConnection_listen(loop, listener_sock, context, events, 'r');
 }
 
 int get_client_sock(ClientConnection *conn) {
@@ -1720,9 +1730,9 @@ void start_server(const char *store_socket_name,
   LOG_DEBUG("Started server connected to store %s, listening on port %d",
             store_socket_name, port);
   event_loop_add_file(g_manager_state->loop, local_sock, EVENT_LOOP_READ,
-                      handle_new_client, g_manager_state);
+                      handle_new_local_client, g_manager_state);
   event_loop_add_file(g_manager_state->loop, remote_sock, EVENT_LOOP_READ,
-                      handle_new_client, g_manager_state);
+                      handle_new_remote_client, g_manager_state);
   /* Set up a client-specific channel to receive notifications from the object
    * table. */
   object_table_subscribe_to_notifications(g_manager_state->db, false,
