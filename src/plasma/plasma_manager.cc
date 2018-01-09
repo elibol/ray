@@ -548,6 +548,7 @@ void process_message(event_loop *loop,
 struct Profile {
 
   private:
+    static const int ID_STRING_SIZE = 64;
     static const int SIZE = 10000000;
     static const int LABEL_SIZE = 64;
     int i = 0;
@@ -555,24 +556,12 @@ struct Profile {
     clock_t e[SIZE] = {0};
 
     // transfers
-    unsigned char *oid[SIZE];
+    ObjectID *oid[SIZE];
     char op[SIZE];
     float progress[SIZE] = {0};
 
     // other
     const char *label[SIZE];
-
-    void id_to_str(unsigned char *id, char *id_string, int id_length) {
-      CHECK(id_length >= ID_STRING_SIZE);
-      static const char hex[] = "0123456789abcdef";
-      char *buf = id_string;
-      for (int i = 0; i < UNIQUE_ID_SIZE; i++) {
-        unsigned int val = id[i];
-        *buf++ = hex[val >> 4];
-        *buf++ = hex[val & 0xf];
-      }
-      *buf = '\0';
-    }
 
   public:
 
@@ -584,10 +573,10 @@ struct Profile {
       this->s[this->i] = clock();
     }
 
-    void end(char op, unsigned char *oid, float progress){
+    void end(char op, ObjectID &oid, float progress){
       this->e[this->i] = clock();
       this->op[this->i] = op;
-      this->oid[this->i] = oid;
+      this->oid[this->i] = &oid;
       this->progress[this->i] = progress;
       this->i += 1;
     }
@@ -615,15 +604,15 @@ struct Profile {
       float progress;
       for (int i=-1;++i<this->i;) {
         progress = -1;
-        *oid = '\0';
+        oid[0] = '\0';
         is_transfer = this->op[i] == 'r' || this->op[i] == 'w';
         if(is_transfer){
-          this->id_to_str(this->oid[i], oid, ID_STRING_SIZE);
+          strcpy(oid, this->oid[i]->hex().c_str());
           progress = this->progress[i];
         }
         fprintf(fp, "%c,%ld,%ld,%s,%f,%s\n",
                 this->op[i], this->s[i], this->e[i],
-                oid, progress, is_transfer? '\0':this->label[i]);
+                oid, progress, is_transfer? "":this->label[i]);
       }
       fclose(fp);
     }
@@ -642,7 +631,7 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
 
   profile.start();
   r = write(conn->fd, buf->data + conn->cursor, s);
-  profile.end('w', buf->object_id.id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
+  profile.end('w', buf->object_id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
 
   int err;
   if (r <= 0) {
@@ -748,7 +737,7 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
 
   profile.start();
   r = read(conn->fd, buf->data + conn->cursor, s);
-  profile.end('r', buf->object_id.id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
+  profile.end('r', buf->object_id, (float) (conn->cursor + r) / (buf->data_size + buf->metadata_size));
 
   int err;
   if (r <= 0) {
