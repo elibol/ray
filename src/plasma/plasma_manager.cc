@@ -608,6 +608,7 @@ void process_message(event_loop *loop,
 struct Profile {
 
   private:
+    static const int ID_STRING_SIZE = 64;
     static const int SIZE = 10000000;
     static const int LABEL_SIZE = 64;
     int i = 0;
@@ -615,24 +616,12 @@ struct Profile {
     clock_t e[SIZE] = {0};
 
     // transfers
-    unsigned char *oid[SIZE];
+    ObjectID *oid[SIZE];
     char op[SIZE];
     float progress[SIZE] = {0};
 
     // other
     const char *label[SIZE];
-
-    void id_to_str(unsigned char *id, char *id_string, int id_length) {
-      CHECK(id_length >= ID_STRING_SIZE);
-      static const char hex[] = "0123456789abcdef";
-      char *buf = id_string;
-      for (int i = 0; i < UNIQUE_ID_SIZE; i++) {
-        unsigned int val = id[i];
-        *buf++ = hex[val >> 4];
-        *buf++ = hex[val & 0xf];
-      }
-      *buf = '\0';
-    }
 
   public:
 
@@ -644,10 +633,10 @@ struct Profile {
       this->s[this->i] = clock();
     }
 
-    void end(char op, unsigned char *oid, float progress){
+    void end(char op, ObjectID &oid, float progress){
       this->e[this->i] = clock();
       this->op[this->i] = op;
-      this->oid[this->i] = oid;
+      this->oid[this->i] = &oid;
       this->progress[this->i] = progress;
       this->i += 1;
     }
@@ -678,7 +667,7 @@ struct Profile {
         oid[0] = '\0';
         is_transfer = this->op[i] == 'r' || this->op[i] == 'w';
         if(is_transfer){
-          this->id_to_str(this->oid[i], oid, ID_STRING_SIZE);
+          strcpy(oid, this->oid[i]->hex().c_str());
           progress = this->progress[i];
         }
         fprintf(fp, "%c,%ld,%ld,%s,%f,%s\n",
@@ -689,7 +678,6 @@ struct Profile {
     }
 
 } profile;
-
 
 int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
   LOG_DEBUG("Writing data to fd %d", conn->fd);
@@ -717,7 +705,7 @@ int write_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
     conn->cursor += r;
     s = buf->data_size + buf->metadata_size - conn->cursor;
   }
-  profile.end('w', buf->object_id.id, -1);
+  profile.end('w', buf->object_id, -1);
 
   CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
   /* If we've finished writing this buffer, reset the cursor. */
@@ -829,7 +817,7 @@ int read_object_chunk(ClientConnection *conn, PlasmaRequestBuffer *buf) {
     conn->cursor += r;
     s = buf->data_size + buf->metadata_size - conn->cursor;
   }
-  profile.end('r', buf->object_id.id, -1);
+  profile.end('r', buf->object_id, -1);
 
   CHECK(conn->cursor <= buf->data_size + buf->metadata_size);
   /* If the cursor is equal to the full object size, reset the cursor and
