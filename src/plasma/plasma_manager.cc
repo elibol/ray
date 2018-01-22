@@ -577,10 +577,13 @@ public:
 
 };
 
+// TODO: need better imp of this.
+std::mutex pclock;
 template <typename I, typename T, typename H=std::hash<I>>
 class PlasmaTransferRequestConsumer {
 
-private:
+protected:
+
   struct PlasmaTransferRequest {
     I id;
     T value;
@@ -697,9 +700,11 @@ struct PlasmaReceiveMeta {
 };
 
 class Receiver: public PlasmaTransferRequestConsumer<ObjectID, PlasmaReceiveMeta, UniqueIDHasher> {
+
 private:
 
   void execute(ObjectID &id, PlasmaReceiveMeta &value) override {
+    LOG_INFO("Receiver.execute %s\n", id.hex().c_str());
     PlasmaRequestBuffer *buf = receive_start(value);
     if(buf->ignore){
       receive_ignore(value, buf);
@@ -718,9 +723,13 @@ private:
     ClientConnection *conn = meta.conn;
     /* The corresponding call to plasma_release should happen in
      * receive_queued_transfer. */
+    Status s;
     // TODO: is access to plasma client thread safe?
-    Status s = conn->manager_state->plasma_conn->Create(
-            meta.object_id.to_plasma_id(), meta.data_size, NULL, meta.metadata_size, &(buf->data));
+    {
+      std::lock_guard<std::mutex> lock(pclock);
+      s = conn->manager_state->plasma_conn->Create(
+              meta.object_id.to_plasma_id(), meta.data_size, NULL, meta.metadata_size, &(buf->data));
+    }
     /* If success_create == true, a new object has been created.
      * If success_create == false the object creation has failed, possibly
      * due to an object with the same ID already existing in the Plasma Store. */
@@ -774,8 +783,11 @@ private:
       LOG_ERROR("receive_end %d %s", conn->tfd, buf->object_id.hex().c_str());
       /* Abort the object that we were trying to read from the remote plasma
        * manager. */
-      ARROW_CHECK_OK(plasma_conn->Release(buf->object_id.to_plasma_id()));
-      ARROW_CHECK_OK(plasma_conn->Abort(buf->object_id.to_plasma_id()));
+      {
+        std::lock_guard<std::mutex> lock(pclock);
+        ARROW_CHECK_OK(plasma_conn->Release(buf->object_id.to_plasma_id()));
+        ARROW_CHECK_OK(plasma_conn->Abort(buf->object_id.to_plasma_id()));
+      }
       /* Remove the bad connection. */
       ClientConnection_free(conn);
       return;
@@ -787,8 +799,11 @@ private:
      * process_data_reply. */
     /* The following seal also triggers notification of clients for fetch or
      * wait requests, see process_object_notification. */
-    ARROW_CHECK_OK(plasma_conn->Seal(buf->object_id.to_plasma_id()));
-    ARROW_CHECK_OK(plasma_conn->Release(buf->object_id.to_plasma_id()));
+    {
+      std::lock_guard<std::mutex> lock(pclock);
+      ARROW_CHECK_OK(plasma_conn->Seal(buf->object_id.to_plasma_id()));
+      ARROW_CHECK_OK(plasma_conn->Release(buf->object_id.to_plasma_id()));
+    }
     /* Remove the request buffer used for reading this object's data. */
 
     conn->manager_state->received_objects[buf->object_id] = current_time_ms();
@@ -812,6 +827,7 @@ private:
 
 public:
   bool add(ObjectID object_id, ClientConnection *conn, int64_t data_size, int64_t metadata_size) {
+    LOG_INFO("Receiver.add %d %s\n", is_started, object_id.hex().c_str());
     PlasmaReceiveMeta value = {conn, object_id, data_size, metadata_size};
     return PlasmaTransferRequestConsumer::add(object_id, value);
   }
@@ -827,7 +843,9 @@ struct PlasmaSendMeta {
 class Sender : public PlasmaTransferRequestConsumer<ObjectID, PlasmaSendMeta, UniqueIDHasher> {
 
 private:
+
   void execute(ObjectID &id, PlasmaSendMeta &value) override {
+    LOG_INFO("Sender.execute %s\n", id.hex().c_str());
     PlasmaRequestBuffer *buf = new PlasmaRequestBuffer();
     bool successful = send_start(value, buf);
     if(!successful){
@@ -842,8 +860,11 @@ private:
     plasma::ObjectBuffer object_buffer;
     plasma::ObjectID object_id = meta.object_id.to_plasma_id();
     /* We pass in 0 to indicate that the command should return immediately. */
-    ARROW_CHECK_OK(
-            meta.conn->manager_state->plasma_conn->Get(&object_id, 1, 0, &object_buffer));
+    {
+      std::lock_guard<std::mutex> lock(pclock);
+      ARROW_CHECK_OK(
+              meta.conn->manager_state->plasma_conn->Get(&object_id, 1, 0, &object_buffer));
+    }
     if (object_buffer.data_size == -1) {
       /* If the object wasn't locally available, exit immediately. If the object
        * later appears locally, the requesting plasma manager should request the
@@ -908,8 +929,11 @@ private:
       /* If we are done with this request, remove it from the transfer queue. */
       /* We are done sending the object, so release it. The corresponding call
        * to plasma_get occurred in process_data_request. */
-      ARROW_CHECK_OK(conn->manager_state->plasma_conn->Release(
-              buf->object_id.to_plasma_id()));
+      {
+        std::lock_guard<std::mutex> lock(pclock);
+        ARROW_CHECK_OK(conn->manager_state->plasma_conn->Release(
+                buf->object_id.to_plasma_id()));
+      }
       delete buf;
     }
     /* If the other side hung up, stop sending to this manager. */
@@ -918,13 +942,17 @@ private:
       /* We errored while sending the object, so release it before removing the
        * connection. The corresponding call to plasma_get occurred in
        * process_data_request. */
-      ARROW_CHECK_OK(conn->manager_state->plasma_conn->Release(buf->object_id.to_plasma_id()));
+      {
+        std::lock_guard<std::mutex> lock(pclock);
+        ARROW_CHECK_OK(conn->manager_state->plasma_conn->Release(buf->object_id.to_plasma_id()));
+      }
       ClientConnection_free(conn);
     }
   }
 
 public:
   bool add(ObjectID object_id, ClientConnection *conn, const char *addr, int port) {
+    LOG_INFO("Sender.add %d %s\n", is_started, object_id.hex().c_str());
     PlasmaSendMeta value = {conn, object_id, addr, port};
     return PlasmaTransferRequestConsumer::add(object_id, value);
   }
