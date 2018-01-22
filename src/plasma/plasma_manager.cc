@@ -25,6 +25,10 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+
 
 #include "common_protocol.h"
 #include "io.h"
@@ -41,6 +45,7 @@
 #include "state/error_table.h"
 #include "state/task_table.h"
 #include "state/db_client_table.h"
+#include "plasma_transfer.h"
 
 int handle_sigpipe(Status s, int fd) {
   if (s.ok()) {
@@ -244,10 +249,6 @@ struct PlasmaManagerState {
 };
 
 PlasmaManagerState *g_manager_state = NULL;
-
-class Receiver;
-
-class Sender;
 
 /* Context for a client connection to another plasma manager. */
 struct ClientConnection {
@@ -544,69 +545,6 @@ void process_message(event_loop *loop,
                      void *context,
                      int events);
 
-ClientConnection *get_manager_connection(PlasmaManagerState *state,
-                                         const char *ip_addr,
-                                         int port) {
-  // CLIENT
-  /* TODO(swang): Should probably check whether ip_addr and port belong to us.
-   */
-  std::string ip_addr_port = std::string(ip_addr) + ":" + std::to_string(port);
-  ClientConnection *manager_conn;
-  auto cc_it = state->manager_connections.find(ip_addr_port);
-  if (cc_it == state->manager_connections.end()) {
-    /* If we don't already have a connection to this manager, start one. */
-    int fd = connect_inet_sock(ip_addr, port);
-    if (fd < 0) {
-      return NULL;
-    }
-
-    int transfer_port = -1;
-    int r = read(fd, &transfer_port, sizeof(int));
-    CHECK(r == sizeof(int));
-    int tfd = connect_inet_sock(ip_addr, transfer_port);
-    LOG_DEBUG("TransferSock (client) %d %d", transfer_port, tfd);
-    if (tfd < 0) {
-      LOG_FATAL("Transfer Client Connect Failed");
-      return NULL;
-    }
-
-    manager_conn = ClientConnection_init(state, fd, ip_addr_port);
-    manager_conn->tfd = tfd;
-  } else {
-    manager_conn = cc_it->second;
-  }
-  return manager_conn;
-}
-
-void send_queued_request(event_loop *loop,
-                         int data_sock,
-                         void *context,
-                         int events){
-  ClientConnection *conn = (ClientConnection *) context;
-  PlasmaManagerState *state = conn->manager_state;
-  PlasmaRequestBuffer *buf = conn->data_request_queue.front();
-  int err = handle_sigpipe(
-          plasma::SendDataRequest(conn->fd, buf->object_id.to_plasma_id(),
-                                  state->addr, state->port),
-          conn->fd);
-  if(err == 0) {
-    assert(buf == conn->data_request_queue.front());
-    conn->data_request_queue.pop_front();
-    delete buf;
-    if (conn->data_request_queue.empty()) {
-      /* If there are no objects to transfer, temporarily remove this connection
-       * from the event loop. It will be reawoken when we receive another
-       * data request. */
-      LOG_DEBUG("send_queued_request_REMLOOP %d %s", data_sock, buf->object_id.hex().c_str());
-      event_loop_remove_file(loop, conn->fd);
-    }
-  } else {
-    LOG_ERROR("send_queued_request_ERROR %d %s", data_sock, buf->object_id.hex().c_str());
-    event_loop_remove_file(loop, conn->fd);
-    ClientConnection_free(conn);
-  }
-}
-
 /**
  * BEGIN TRANSFER CPP
  */
@@ -639,6 +577,118 @@ public:
 
 };
 
+template <typename I, typename T, typename H=std::hash<I>>
+class PlasmaTransferRequestConsumer {
+
+private:
+  struct PlasmaTransferRequest {
+    I id;
+    T value;
+  };
+  std::list<PlasmaTransferRequest> request_queue;
+  std::unordered_set<I, H> ids;
+
+  bool is_started = false;
+  bool is_stopped = false;
+  std::thread p;
+  std::mutex qlock;
+  std::condition_variable cv;
+
+  PlasmaTransferRequestConsumer &operator=(const PlasmaTransferRequestConsumer &o) {
+    // https://stackoverflow.com/questions/29603513/assignment-operator-in-struct-after-adding-mutex-in-c
+    throw std::exception();
+  }
+
+  void wait(){
+    std::unique_lock<std::mutex> lock(qlock);
+    cv.wait(lock, [this]{return !request_queue.empty() || is_stopped;});
+  }
+
+  PlasmaTransferRequest front(){
+    PlasmaTransferRequest o = request_queue.front();
+    return o;
+  }
+
+  void pop_front(){
+    std::unique_lock<std::mutex> lock(qlock);
+    PlasmaTransferRequest o = request_queue.front();
+    request_queue.pop_front();
+    ids.erase(o.id);
+  }
+
+  void loop(){
+    PlasmaTransferRequest o;
+    while(!is_stopped){
+      wait();
+      if(!empty()){
+        o = front();
+        execute(o.id, o.value);
+        pop_front();
+      }
+    }
+  }
+
+  virtual void execute(I &id, T &value){
+    throw std::exception();
+  }
+
+public:
+
+  PlasmaTransferRequestConsumer() = default;
+
+  bool is_queued(I &id){
+    return ids.count(id) > 0;
+  }
+
+  ulong size(){
+    return request_queue.size();
+  }
+
+  bool empty(){
+    return request_queue.empty();
+  }
+
+  bool add(I id, T value){
+    if(is_queued(id)){
+      return false;
+    }
+    std::unique_lock<std::mutex> lock(qlock);
+    PlasmaTransferRequest o = {id, value};
+    request_queue.push_back(o);
+    ids.insert(id);
+    cv.notify_all();
+    return true;
+  }
+
+  void start(){
+    is_started = true;
+    p = std::thread(&PlasmaTransferRequestConsumer::loop, this);
+  }
+
+  void stop(){
+    if(is_stopped){
+      // TODO(hme): log this.
+      return;
+    }
+    if(!is_started){
+      return;
+    }
+    {
+      std::unique_lock<std::mutex> lock(qlock);
+      is_stopped = true;
+      cv.notify_all();
+    }
+    p.join();
+
+    // clean up
+    ids.clear();
+    while (!request_queue.empty()) {
+      request_queue.pop_front();
+    }
+  }
+
+};
+
 struct PlasmaReceiveMeta {
   ClientConnection *conn;
   ObjectID object_id;
@@ -646,35 +696,16 @@ struct PlasmaReceiveMeta {
   int64_t metadata_size;
 };
 
-class Receiver {
+class Receiver: public PlasmaTransferRequestConsumer<ObjectID, PlasmaReceiveMeta, UniqueIDHasher> {
 private:
-  // TODO: is access to plasma client thread safe?
-  std::list<PlasmaReceiveMeta> queue;
-  std::unordered_set<ObjectID, UniqueIDHasher> object_ids;
 
-  bool is_object_queued(ObjectID &object_id){
-    return object_ids.count(object_id) > 0;
-  }
-
-  // TODO (hme): add loop thread.
-
-  void next(){
-    // TODO (hme): add lock
-    if(!queue.empty()){
-      PlasmaReceiveMeta meta = queue.front();
-      receive(meta);
-      queue.pop_front();
-      object_ids.erase(meta.object_id);
-    }
-  }
-
-  void receive(PlasmaReceiveMeta meta){
-    PlasmaRequestBuffer *buf = receive_start(meta);
+  void execute(ObjectID &id, PlasmaReceiveMeta &value) override {
+    PlasmaRequestBuffer *buf = receive_start(value);
     if(buf->ignore){
-      receive_ignore(meta, buf);
+      receive_ignore(value, buf);
     } else {
-      int err = receive_execute(meta, buf);
-      receive_end(meta, buf, err);
+      int err = receive_execute(value, buf);
+      receive_end(value, buf, err);
     }
   }
 
@@ -687,6 +718,7 @@ private:
     ClientConnection *conn = meta.conn;
     /* The corresponding call to plasma_release should happen in
      * receive_queued_transfer. */
+    // TODO: is access to plasma client thread safe?
     Status s = conn->manager_state->plasma_conn->Create(
             meta.object_id.to_plasma_id(), meta.data_size, NULL, meta.metadata_size, &(buf->data));
     /* If success_create == true, a new object has been created.
@@ -780,25 +812,10 @@ private:
   }
 
 public:
-  bool add_object(ClientConnection *conn, ObjectID object_id, int64_t data_size, int64_t metadata_size) {
-    if (is_object_queued(object_id)) {
-      return false;
-    }
-    object_ids.insert(object_id);
-    PlasmaReceiveMeta meta = {conn, object_id, data_size, metadata_size};
-    queue.push_back(meta);
-    return true;
-    // TODO (hme): add lock
+  bool add(ObjectID object_id, ClientConnection *conn, int64_t data_size, int64_t metadata_size) {
+    PlasmaReceiveMeta value = {conn, object_id, data_size, metadata_size};
+    return PlasmaTransferRequestConsumer::add(object_id, value);
   }
-
-  void exit(){
-    object_ids.clear();
-    while (!queue.empty()) {
-      // delete queue.front();
-      queue.pop_front();
-    }
-  }
-
 };
 
 struct PlasmaSendMeta {
@@ -808,35 +825,17 @@ struct PlasmaSendMeta {
   int port;
 };
 
-class Sender {
+class Sender : public PlasmaTransferRequestConsumer<ObjectID, PlasmaSendMeta, UniqueIDHasher> {
+
 private:
-  std::list<PlasmaSendMeta> queue;
-  std::unordered_set<ObjectID, UniqueIDHasher> object_ids;
-
-  bool is_object_queued(ObjectID &object_id){
-    return object_ids.count(object_id) > 0;
-  }
-
-  // TODO (hme): add loop thread.
-
-  void next(){
-    // TODO (hme): add lock
-    if(!queue.empty()){
-      PlasmaSendMeta meta = queue.front();
-      send(meta);
-      queue.pop_front();
-      object_ids.erase(meta.object_id);
-    }
-  }
-
-  void send(PlasmaSendMeta meta){
+  void execute(ObjectID &id, PlasmaSendMeta &value) override {
     PlasmaRequestBuffer *buf = new PlasmaRequestBuffer();
-    bool successful = send_start(meta, buf);
+    bool successful = send_start(value, buf);
     if(!successful){
       return;
     }
-    int err = send_execute(meta, buf);
-    send_end(meta, buf, err);
+    int err = send_execute(value, buf);
+    send_end(value, buf, err);
   }
 
   bool send_start(PlasmaSendMeta meta, PlasmaRequestBuffer *buf){
@@ -926,25 +925,10 @@ private:
   }
 
 public:
-  bool add_object(ClientConnection *conn, ObjectID object_id, const char *addr, int port){
-    if(is_object_queued(object_id)){
-      return false;
-    }
-    object_ids.insert(object_id);
-    PlasmaSendMeta meta = {conn, object_id, addr, port};
-    queue.push_back(meta);
-    return true;
-    // TODO (hme): add lock
-  };
-
-  void exit(){
-    object_ids.clear();
-    while (!queue.empty()) {
-      // delete queue.front();
-      queue.pop_front();
-    }
+  bool add(ObjectID object_id, ClientConnection *conn, const char *addr, int port) {
+    PlasmaSendMeta value = {conn, object_id, addr, port};
+    return PlasmaTransferRequestConsumer::add(object_id, value);
   }
-
 };
 
 /**
@@ -961,7 +945,7 @@ void process_data_request(event_loop *loop,
   if (manager_conn == NULL) {
     return;
   }
-  conn->sender->add_object(manager_conn, obj_id, addr, port);
+  conn->sender->add(obj_id, manager_conn, addr, port);
 }
 
 /**
@@ -983,7 +967,71 @@ void process_data_reply(event_loop *loop,
                         int64_t data_size,
                         int64_t metadata_size,
                         ClientConnection *conn) {
-  conn->receiver->add_object(conn, object_id, data_size, metadata_size);
+  conn->receiver->add(object_id, conn, data_size, metadata_size);
+}
+
+ClientConnection *get_manager_connection(PlasmaManagerState *state,
+                                         const char *ip_addr,
+                                         int port) {
+  // CLIENT (RECEIVER)
+  /* TODO(swang): Should probably check whether ip_addr and port belong to us.
+   */
+  std::string ip_addr_port = std::string(ip_addr) + ":" + std::to_string(port);
+  ClientConnection *manager_conn;
+  auto cc_it = state->manager_connections.find(ip_addr_port);
+  if (cc_it == state->manager_connections.end()) {
+    /* If we don't already have a connection to this manager, start one. */
+    int fd = connect_inet_sock(ip_addr, port);
+    if (fd < 0) {
+      return NULL;
+    }
+
+    int transfer_port = -1;
+    int r = read(fd, &transfer_port, sizeof(int));
+    CHECK(r == sizeof(int));
+    int tfd = connect_inet_sock(ip_addr, transfer_port);
+    LOG_DEBUG("TransferSock (client) %d %d", transfer_port, tfd);
+    if (tfd < 0) {
+      LOG_FATAL("Transfer Client Connect Failed");
+      return NULL;
+    }
+
+    manager_conn = ClientConnection_init(state, fd, ip_addr_port);
+    manager_conn->tfd = tfd;
+    manager_conn->receiver->start();
+  } else {
+    manager_conn = cc_it->second;
+  }
+  return manager_conn;
+}
+
+void send_queued_request(event_loop *loop,
+                         int data_sock,
+                         void *context,
+                         int events){
+  ClientConnection *conn = (ClientConnection *) context;
+  PlasmaManagerState *state = conn->manager_state;
+  PlasmaRequestBuffer *buf = conn->data_request_queue.front();
+  int err = handle_sigpipe(
+          plasma::SendDataRequest(conn->fd, buf->object_id.to_plasma_id(),
+                                  state->addr, state->port),
+          conn->fd);
+  if(err == 0) {
+    assert(buf == conn->data_request_queue.front());
+    conn->data_request_queue.pop_front();
+    delete buf;
+    if (conn->data_request_queue.empty()) {
+      /* If there are no objects to transfer, temporarily remove this connection
+       * from the event loop. It will be reawoken when we receive another
+       * data request. */
+      LOG_DEBUG("send_queued_request_REMLOOP %d %s", data_sock, buf->object_id.hex().c_str());
+      event_loop_remove_file(loop, conn->fd);
+    }
+  } else {
+    LOG_ERROR("send_queued_request_ERROR %d %s", data_sock, buf->object_id.hex().c_str());
+    event_loop_remove_file(loop, conn->fd);
+    ClientConnection_free(conn);
+  }
 }
 
 void request_transfer_from(PlasmaManagerState *manager_state,
@@ -1487,7 +1535,7 @@ ClientConnection *ClientConnection_listen(event_loop *loop,
                                           void *context,
                                           int events,
                                           char conn_type) {
-  // SERVER
+  // SERVER (SENDER)
   PlasmaManagerState *state = (PlasmaManagerState *) context;
   int new_socket = accept_client(listener_sock);
   LOG_DEBUG("New client connection with fd %d", new_socket);
@@ -1506,6 +1554,7 @@ ClientConnection *ClientConnection_listen(event_loop *loop,
       LOG_FATAL("Transfer Server Connect Failed");
     } else {
       conn->tfd = transfer_socket;
+      conn->sender->start();
     }
   }
 
@@ -1518,8 +1567,8 @@ void ClientConnection_free(ClientConnection *client_conn) {
   state->manager_connections.erase(client_conn->ip_addr_port);
 
   /* Free the request and transfer queue. */
-  client_conn->sender->exit();
-  client_conn->receiver->exit();
+  client_conn->sender->stop();
+  client_conn->receiver->stop();
   while (client_conn->data_request_queue.size()) {
     delete client_conn->data_request_queue.front();
     client_conn->data_request_queue.pop_front();

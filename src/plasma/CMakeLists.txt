@@ -20,7 +20,7 @@ include_directories("${FLATBUFFERS_INCLUDE_DIR}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
 
 add_executable(plasma_manager
-  plasma_manager.cc)
+  plasma_manager.cc plasma_transfer.h plasma_transfer.cc)
 
 target_link_libraries(plasma_manager common ${PLASMA_STATIC_LIB} ray_static ${ARROW_STATIC_LIB} -lpthread)
 
