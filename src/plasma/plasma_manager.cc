@@ -620,6 +620,7 @@ protected:
   }
 
   void loop(){
+    LOG_INFO("PlasmaTransferRequestConsumer.loop\n");
     PlasmaTransferRequest o;
     while(!is_stopped){
       wait();
@@ -1025,6 +1026,7 @@ ClientConnection *get_manager_connection(PlasmaManagerState *state,
 
     manager_conn = ClientConnection_init(state, fd, ip_addr_port);
     manager_conn->tfd = tfd;
+    manager_conn->sender->start();
     manager_conn->receiver->start();
   } else {
     manager_conn = cc_it->second;
@@ -1549,6 +1551,8 @@ ClientConnection *ClientConnection_init(PlasmaManagerState *state,
                                         std::string const &client_key) {
   /* Create a new data connection context per client. */
   ClientConnection *conn = new ClientConnection();
+  conn->sender = new Sender();
+  conn->receiver = new Receiver();
   conn->manager_state = state;
   conn->fd = client_sock;
   conn->num_return_objects = 0;
@@ -1582,6 +1586,7 @@ ClientConnection *ClientConnection_listen(event_loop *loop,
     } else {
       conn->tfd = transfer_socket;
       conn->sender->start();
+      conn->receiver->start();
     }
   }
 
