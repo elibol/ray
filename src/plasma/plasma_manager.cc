@@ -274,6 +274,7 @@ struct ClientConnection {
    * string <address>:<port> as an identifier. */
   std::string ip_addr_port;
 
+  // TODO (hme): make these unique pointers and move to PlasmaStateManager
   Receiver *receiver;
   Sender *sender;
 
@@ -577,8 +578,10 @@ public:
 
 };
 
-// TODO: need better imp of this.
+// TODO (hme): Create two connections to plasma client.
 std::mutex pclock;
+
+// TODO (hme): move to common.
 template <typename I, typename T, typename H=std::hash<I>>
 class PlasmaTransferRequestConsumer {
 
@@ -704,6 +707,7 @@ class Receiver: public PlasmaTransferRequestConsumer<ObjectID, PlasmaReceiveMeta
 
 private:
 
+  // TODO (hme): make id const, and immutables const in general.
   void execute(ObjectID &id, PlasmaReceiveMeta &value) override {
     LOG_INFO("Receiver.execute %s\n", id.hex().c_str());
     PlasmaRequestBuffer *buf = receive_start(value);
