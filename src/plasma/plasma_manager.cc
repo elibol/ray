@@ -281,10 +281,12 @@ struct ClientConnection {
    * string <address>:<port> as an identifier. */
   std::string ip_addr_port;
 
+  // whether this is a connection to another plasma manager.
+  bool is_remote = false;
+
   // TODO (hme): make these unique pointers and move to PlasmaStateManager
   Receiver *receiver;
   Sender *sender;
-
 };
 
 /**
@@ -1054,6 +1056,7 @@ ClientConnection *get_manager_connection(PlasmaManagerState *state,
     manager_conn->tfd = tfd;
     manager_conn->sender->start();
     manager_conn->receiver->start();
+    manager_conn->is_remote = true;
   } else {
     manager_conn = cc_it->second;
   }
@@ -1621,6 +1624,7 @@ ClientConnection *ClientConnection_listen(event_loop *loop,
   snprintf(client_key, sizeof(client_key), "%d", new_socket);
   ClientConnection *conn = ClientConnection_init(state, new_socket, client_key);
 
+  conn->is_remote = is_remote;
   if(is_remote){
     TransferSock transfer_server = TransferSock::get_sock();
     int r = write(new_socket, &transfer_server.port, sizeof(int));
@@ -1646,8 +1650,10 @@ void ClientConnection_free(ClientConnection *client_conn) {
   state->manager_connections.erase(client_conn->ip_addr_port);
 
   /* Free the request and transfer queue. */
-  client_conn->sender->stop();
-  client_conn->receiver->stop();
+  if (client_conn->is_remote){
+    client_conn->sender->stop();
+    client_conn->receiver->stop();
+  }
   while (client_conn->data_request_queue.size()) {
     delete client_conn->data_request_queue.front();
     client_conn->data_request_queue.pop_front();
