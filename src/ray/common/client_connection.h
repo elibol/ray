@@ -29,17 +29,15 @@ class ClientConnection : public std::enable_shared_from_this<ClientConnection<T>
   /// message from this client.
   /// \param socket The client socket.
   /// \return std::shared_ptr<ClientConnection>.
-  static std::shared_ptr<ClientConnection<T>> Create(
-      ClientManager<T>& manager,
-      boost::asio::basic_stream_socket<T> &&socket);
+  static pointer Create(ClientManager<T>& manager,
+                        boost::asio::basic_stream_socket<T> &&socket);
 
   /// Allocate a new node client connection.
   /// \param ClientManager A reference to the manager that will process a
   /// \param io_service The asio io_service.
   /// message from this client.
-  static pointer Create(
-      ClientManager<T>& manager,
-      boost::asio::io_service& io_service);
+  static pointer Create(ClientManager<T>& manager,
+                        boost::asio::io_service& io_service);
 
   /// Listen for and process messages from the client connection. Once a
   /// message has been fully received, the client manager's
@@ -56,17 +54,6 @@ class ClientConnection : public std::enable_shared_from_this<ClientConnection<T>
 
   /// \return The socket associated with this connection.
   boost::asio::basic_stream_socket<T> &GetSocket();
-
-  /// Buffers for the current message being read from the client.
-  int64_t read_version_;
-  int64_t read_type_;
-  uint64_t read_length_;
-  std::vector<uint8_t> read_message_;
-  /// Buffers for the current message being written to the client.
-  int64_t write_version_;
-  int64_t write_type_;
-  uint64_t write_length_;
-  std::vector<uint8_t> write_message_;
 
  private:
   /// A private constructor for a node client connection with socket.
@@ -90,6 +77,17 @@ class ClientConnection : public std::enable_shared_from_this<ClientConnection<T>
   /// A reference to the manager for this client. The manager exposes a handler
   /// for all messages processed by this client.
   ClientManager<T>& manager_;
+  /// Buffers for the current message being read from the client.
+  int64_t read_version_;
+  int64_t read_type_;
+  uint64_t read_length_;
+  std::vector<uint8_t> read_message_;
+  /// Buffers for the current message being written to the client.
+  int64_t write_version_;
+  int64_t write_type_;
+  uint64_t write_length_;
+  std::vector<uint8_t> write_message_;
+
 };
 
 using LocalClientConnection = ClientConnection<boost::asio::local::stream_protocol>;

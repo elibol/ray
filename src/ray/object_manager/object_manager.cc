@@ -131,22 +131,12 @@ ray::Status ObjectManager::Pull(const ObjectID &object_id,
 
 ray::Status ObjectManager::ExecutePull(const ObjectID &object_id,
                                        SenderConnection::pointer conn) {
-  size_t msg_type = OMMessageType_PullRequest;
-  boost::system::error_code ec;
-  boost::asio::write(conn->GetSocket(),
-                     boost::asio::buffer(&msg_type,
-                                         sizeof(msg_type)),
-                     ec);
   flatbuffers::FlatBufferBuilder fbb;
-  auto message = CreatePullRequest(fbb,
-                                   fbb.CreateString(client_id_.binary()),
-                                   fbb.CreateString(object_id.binary()));
+  auto message = CreatePullRequestMessage(fbb,
+                                          fbb.CreateString(client_id_.binary()),
+                                          fbb.CreateString(object_id.binary()));
   fbb.Finish(message);
-  size_t length = fbb.GetSize();
-  std::vector<boost::asio::const_buffer> buffer;
-  buffer.push_back(boost::asio::buffer(&length, sizeof(length)));
-  buffer.push_back(boost::asio::buffer(fbb.GetBufferPointer(), length));
-  boost::asio::write(conn->GetSocket(), buffer);
+  conn->WriteMessage(OMMessageType_PullRequest, fbb.GetSize(), fbb.GetBufferPointer());
   return ray::Status::OK();
 };
 
@@ -212,7 +202,7 @@ ray::Status ObjectManager::ExecutePushMeta(const ObjectID &object_id_const,
   conn->AddSendRequest(object_id, send_request);
   // Create buffer.
   flatbuffers::FlatBufferBuilder fbb;
-  auto message = CreateObjectHeader(fbb, fbb.CreateString(object_id.binary()), send_request.object_size);
+  auto message = CreatePushRequestMessage(fbb, fbb.CreateString(object_id.binary()), send_request.object_size);
   fbb.Finish(message);
   // Pack into asio buffer.
   size_t length = fbb.GetSize();
@@ -287,20 +277,14 @@ ray::Status ObjectManager::GetMsgConnection(
 ray::Status ObjectManager::CreateMsgConnection(const RemoteConnectionInfo &info,
                                                std::function<void(SenderConnection::pointer)> callback){
   message_send_connections_.emplace(info.client_id, SenderConnection::Create(io_service_, info.ip, info.port));
-  // Prepare client connection info buffer.
+  // Prepare client connection info buffer
   flatbuffers::FlatBufferBuilder fbb;
   bool is_transfer = false;
-  auto message = CreateClientConnectionInfo(fbb, fbb.CreateString(client_id_.binary()), is_transfer);
+  auto message = CreateConnectClientMessage(fbb, fbb.CreateString(client_id_.binary()), is_transfer);
   fbb.Finish(message);
-  // Pack into asio buffer.
-  size_t length = fbb.GetSize();
-  std::vector<boost::asio::const_buffer> buffer;
-  buffer.push_back(boost::asio::buffer(&length, sizeof(length)));
-  buffer.push_back(boost::asio::buffer(fbb.GetBufferPointer(), length));
   // Send synchronously.
   SenderConnection::pointer conn = message_send_connections_[info.client_id];
-  boost::system::error_code error;
-  boost::asio::write(conn->GetSocket(), buffer);
+  conn->WriteMessage(OMMessageType_ConnectClient, fbb.GetSize(), fbb.GetBufferPointer());
   // The connection is ready, invoke callback with connection info.
   callback(message_send_connections_[info.client_id]);
   return Status::OK();
@@ -329,77 +313,113 @@ ray::Status ObjectManager::GetTransferConnection(
 
 ray::Status ObjectManager::CreateTransferConnection(const RemoteConnectionInfo &info,
                                                     std::function<void(SenderConnection::pointer)> callback){
-
-  transfer_send_connections_.emplace(info.client_id, SenderConnection::Create(io_service_, info.ip, info.port));
+  transfer_send_connections_.emplace(info.client_id,
+                                     SenderConnection::Create(io_service_, info.ip, info.port));
   // Prepare client connection info buffer.
   flatbuffers::FlatBufferBuilder fbb;
   bool is_transfer = true;
-  auto message = CreateClientConnectionInfo(fbb, fbb.CreateString(client_id_.binary()), is_transfer);
+  auto message = CreateConnectClientMessage(fbb, fbb.CreateString(client_id_.binary()), is_transfer);
   fbb.Finish(message);
-  // Pack into asio buffer.
-  size_t length = fbb.GetSize();
-  std::vector<boost::asio::const_buffer> buffer;
-  buffer.push_back(boost::asio::buffer(&length, sizeof(length)));
-  buffer.push_back(boost::asio::buffer(fbb.GetBufferPointer(), length));
   // Send synchronously.
   SenderConnection::pointer conn = transfer_send_connections_[info.client_id];
-  boost::system::error_code ec;
-  boost::asio::write(conn->GetSocket(), buffer, ec);
+  conn->WriteMessage(OMMessageType_ConnectClient, fbb.GetSize(), fbb.GetBufferPointer());
   callback(transfer_send_connections_[info.client_id]);
   return Status::OK();
 };
 
 void ObjectManager::ProcessNewClient(std::shared_ptr<TcpClientConnection> conn){
-  boost::system::error_code ec;
-  // read header
-  size_t length;
-  std::vector<boost::asio::mutable_buffer> header;
-  header.push_back(boost::asio::buffer(&length, sizeof(length)));
-  boost::asio::read(conn->GetSocket(), header, ec);
-  // read data
-  std::vector<uint8_t> message;
-  message.resize(length);
-  boost::asio::read(conn->GetSocket(), boost::asio::buffer(message), ec);
-  // Serialize
-  auto info = flatbuffers::GetRoot<ClientConnectionInfo>(message.data());
+  conn->ProcessMessages();
+};
+
+void ObjectManager::ProcessClientMessage(std::shared_ptr<TcpClientConnection> conn,
+                                         int64_t message_type,
+                                         const uint8_t *message){
+  cout << "ProcessClientMessage " << message_type << endl;
+  switch(message_type) {
+    case OMMessageType_PushRequest: {
+      // TODO(hme): Realize design with transfer requests handled in this manner.
+      break;
+    }
+    case OMMessageType_PullRequest: {
+      ReceivePullRequest(conn, message);
+      conn->ProcessMessages();
+      break;
+    }
+    case OMMessageType_ConnectClient: {
+      ConnectClient(conn, message);
+      break;
+    }
+    case OMMessageType_DisconnectClient: {
+      DisconnectClient(conn, message);
+      break;
+    }
+    default: {
+      RAY_LOG(FATAL) << "invalid request " << message_type;
+    }
+  }
+};
+
+void ObjectManager::ConnectClient(std::shared_ptr<TcpClientConnection> &conn,
+                                  const uint8_t *message){
+  RAY_LOG(INFO) << "ConnectClient";
+  auto info = flatbuffers::GetRoot<ConnectClientMessage>(message);
   ClientID client_id = ObjectID::from_binary(info->client_id()->str());
   bool is_transfer = info->is_transfer();
   // TODO: trash connection if either fails.
   if (is_transfer) {
+    RAY_LOG(INFO) << "is_transfer " << is_transfer;
     transfer_receive_connections_[client_id] = conn;
-    Status status = WaitPushReceive(conn);
-    RAY_CHECK_OK(status);
-    // return status;
+    WaitPushReceive(conn);
   } else {
     message_receive_connections_[client_id] = conn;
-    Status status = WaitMessage(conn);
-    RAY_CHECK_OK(status);
+    conn->ProcessMessages();
   }
 };
 
+void ObjectManager::DisconnectClient(std::shared_ptr<TcpClientConnection> &conn,
+                                     const uint8_t *message){
+  auto info = flatbuffers::GetRoot<DisconnectClientMessage>(message);
+  ClientID client_id = ObjectID::from_binary(info->client_id()->str());
+  bool is_transfer = info->is_transfer();
+  if (is_transfer) {
+    transfer_receive_connections_.erase(client_id);
+  } else {
+    message_receive_connections_.erase(client_id);
+  }
+  // TODO(hme): appropriately dispose of client connection.
+};
 
-//ray::Status ObjectManager::AcceptConnection(TCPClientConnection::pointer conn){
-//};
+void ObjectManager::ReceivePullRequest(std::shared_ptr<TcpClientConnection> &conn,
+                                       const uint8_t *message){
+  // Serialize.
+  auto pr = flatbuffers::GetRoot<PullRequestMessage>(message);
+  ObjectID object_id = ObjectID::from_binary(pr->object_id()->str());
+  ClientID client_id = ClientID::from_binary(pr->client_id()->str());
+  // Push object to requesting client.
+  ray::Status push_status = Push(object_id, client_id);
+};
 
 ray::Status ObjectManager::WaitPushReceive(std::shared_ptr<TcpClientConnection> conn){
   boost::asio::async_read(conn->GetSocket(),
-                          boost::asio::buffer(&conn->read_length_, sizeof(conn->read_length_)),
+                          boost::asio::buffer(&read_length_, sizeof(read_length_)),
                           boost::bind(&ObjectManager::HandlePushReceive,
                                       this,
                                       conn,
                                       boost::asio::placeholders::error));
   return ray::Status::OK();
-}
+};
 
-void ObjectManager::HandlePushReceive(std::shared_ptr<TcpClientConnection> conn, BoostEC length_ec){
+void ObjectManager::HandlePushReceive(std::shared_ptr<TcpClientConnection> conn,
+                                      BoostEC length_ec){
   std::vector<uint8_t> message;
-  message.resize(conn->read_length_);
+  message.resize(read_length_);
   boost::system::error_code ec;
   boost::asio::read(conn->GetSocket(), boost::asio::buffer(message), ec);
   // Serialize.
-  auto object_header = flatbuffers::GetRoot<ObjectHeader>(message.data());
+  auto object_header = flatbuffers::GetRoot<PushRequestMessage>(message.data());
   ObjectID object_id = ObjectID::from_binary(object_header->object_id()->str());
   int64_t object_size = (int64_t) object_header->object_size();
+  cout << object_size << " " << object_id.hex() << endl;
   int64_t metadata_size = 0;
   // Try to create shared buffer.
   std::shared_ptr<Buffer> data;
@@ -425,47 +445,5 @@ void ObjectManager::HandlePushReceive(std::shared_ptr<TcpClientConnection> conn,
   // Wait for another push.
   ray::Status ray_status = WaitPushReceive(conn);
 };
-
-ray::Status ObjectManager::WaitMessage(std::shared_ptr<TcpClientConnection> conn){
-  boost::asio::async_read(conn->GetSocket(),
-                          boost::asio::buffer(&conn->read_type_, sizeof(conn->read_type_)),
-                          boost::bind(&ObjectManager::HandleMessage,
-                                      this,
-                                      conn,
-                                      boost::asio::placeholders::error));
-  return ray::Status::OK();
-}
-
-void ObjectManager::HandleMessage(std::shared_ptr<TcpClientConnection> conn, BoostEC msg_ec){
-  switch(conn->read_type_){
-    case OMMessageType_PullRequest:
-      ReceivePullRequest(conn);
-  }
-}
-
-void ObjectManager::ReceivePullRequest(std::shared_ptr<TcpClientConnection> conn){
-  boost::asio::read(conn->GetSocket(),
-                    boost::asio::buffer(&conn->read_length_,
-                                        sizeof(conn->read_length_))
-  );
-  std::vector<uint8_t> message;
-  message.resize(conn->read_length_);
-  boost::system::error_code ec;
-  boost::asio::read(conn->GetSocket(), boost::asio::buffer(message), ec);
-  // Serialize.
-  auto pr = flatbuffers::GetRoot<PullRequest>(message.data());
-  ObjectID object_id = ObjectID::from_binary(pr->object_id()->str());
-  ClientID client_id = ClientID::from_binary(pr->client_id()->str());
-  // Push object to requesting client.
-  ray::Status push_status = Push(object_id, client_id);
-  ray::Status wait_status = WaitMessage(conn);
-}
-
-void ObjectManager::ProcessClientMessage(std::shared_ptr<TcpClientConnection> client,
-                                         int64_t message_type,
-                                         const uint8_t *message){
-  cout << "wat?" << endl;
-};
-
 
 } // end ray

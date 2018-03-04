@@ -10,7 +10,7 @@
 #include <boost/enable_shared_from_this.hpp>
 
 #include "ray/id.h"
-
+#include "common/state/ray_config.h"
 namespace ray {
 
 struct SendRequest {
@@ -45,7 +45,28 @@ const std::string &ip, ushort port);
   void RemoveSendRequest(const ObjectID &object_id);
   SendRequest &GetSendRequest(const ObjectID &object_id);
 
+  void WriteMessage(int64_t type, size_t length, const uint8_t *message) {
+    std::vector<boost::asio::const_buffer> message_buffers;
+    // TODO (hme): Get protocol version without using Ray global.
+    write_version_ = RayConfig::instance().ray_protocol_version();
+    write_type_ = type;
+    write_length_ = length;
+    write_message_.assign(message, message + length);
+    message_buffers.push_back(boost::asio::buffer(&write_version_, sizeof(write_version_)));
+    message_buffers.push_back(boost::asio::buffer(&write_type_, sizeof(write_type_)));
+    message_buffers.push_back(boost::asio::buffer(&write_length_, sizeof(write_length_)));
+    message_buffers.push_back(boost::asio::buffer(write_message_));
+    boost::system::error_code error;
+    boost::asio::write(socket_, message_buffers, error);
+    assert(error.value() == 0);
+  }
+
  private:
+  int64_t write_version_;
+  int64_t write_type_;
+  uint64_t write_length_;
+  std::vector<uint8_t> write_message_;
+
   boost::asio::ip::tcp::socket socket_;
   SendQueueType send_queue_;
   SendRequestsType send_requests_;

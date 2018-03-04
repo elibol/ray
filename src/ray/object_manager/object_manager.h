@@ -108,7 +108,12 @@ class ObjectManager : public ClientManager<boost::asio::ip::tcp> {
   /// This is invoked by an external server.
   /// \param conn The connection.
   void ProcessNewClient(std::shared_ptr<TcpClientConnection> conn) override;
-  void ProcessClientMessage(std::shared_ptr<TcpClientConnection> client,
+
+  /// Process messages sent from other nodes.
+  /// \param conn The connection.
+  /// \param message_type The message type.
+  /// \param message A pointer set to the beginning of the message.
+  void ProcessClientMessage(std::shared_ptr<TcpClientConnection> conn,
                             int64_t message_type,
                             const uint8_t *message) override;
 
@@ -191,10 +196,18 @@ class ObjectManager : public ClientManager<boost::asio::ip::tcp> {
                      std::shared_ptr<TcpClientConnection>,
                      ray::UniqueIDHasher> transfer_receive_connections_;
 
+  /// Read length for push receives.
+  uint64_t read_length_;
+
   /// Handle starting, running, and stopping asio io_service.
   void StartIOService();
   void IOServiceLoop();
   void StopIOService();
+
+  /// Register object add with directory.
+  void NotifyDirectoryObjectAdd(const ObjectID &object_id);
+  /// Register object remove with directory.
+  void NotifyDirectoryObjectDeleted(const ObjectID &object_id);
 
   /// Wait wait_ms milliseconds before triggering a pull request for object_id.
   /// This is invoked when a pull fails. Only point of failure currently considered
@@ -254,24 +267,23 @@ class ObjectManager : public ClientManager<boost::asio::ip::tcp> {
   ray::Status CreateTransferConnection(const RemoteConnectionInfo &info,
                                        std::function<void(SenderConnection::pointer)> callback);
 
+  /// Handles receiving a pull request message.
+  void ReceivePullRequest(std::shared_ptr<TcpClientConnection> &conn,
+                          const uint8_t *message);
+
+  /// Handles connect message of a new client connection.
+  void ConnectClient(std::shared_ptr<TcpClientConnection> &conn, const uint8_t *message);
+
+  /// Handles disconnect message of an existing client connection.
+  void DisconnectClient(std::shared_ptr<TcpClientConnection> &conn, const uint8_t *message);
+
   /// A socket connection doing an asynchronous read on a transfer connection that was
-  /// added by AcceptConnection.
+  /// added by ConnectClient.
   ray::Status WaitPushReceive(std::shared_ptr<TcpClientConnection> conn);
+
   /// Invoked when a remote object manager pushes an object to this object manager.
-  void HandlePushReceive(std::shared_ptr<TcpClientConnection> conn, BoostEC length_ec);
-
-  /// A socket connection doing an asynchronous read on a message connection that was
-  /// added by AcceptConnection.
-  ray::Status WaitMessage(std::shared_ptr<TcpClientConnection> conn);
-  /// Handle messages.
-  void HandleMessage(std::shared_ptr<TcpClientConnection> conn, BoostEC msg_ec);
-  /// Process the receive pull request message.
-  void ReceivePullRequest(std::shared_ptr<TcpClientConnection> conn);
-
-  /// Register object add with directory.
-  void NotifyDirectoryObjectAdd(const ObjectID &object_id);
-  /// Register object remove with directory.
-  void NotifyDirectoryObjectDeleted(const ObjectID &object_id);
+  void HandlePushReceive(std::shared_ptr<TcpClientConnection> conn,
+                         BoostEC length_ec);
 
 };
 

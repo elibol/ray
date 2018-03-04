@@ -17,8 +17,6 @@ shared_ptr<ClientConnection<T>> ClientConnection<T>::Create(
     ClientManager<T>& manager,
     boost::asio::basic_stream_socket<T> &&socket) {
   shared_ptr<ClientConnection<T>> self(new ClientConnection(manager, std::move(socket)));
-  // Let our manager process our new connection.
-  self->manager_.ProcessNewClient(self);
   return self;
 }
 
@@ -35,8 +33,6 @@ shared_ptr<ClientConnection<T>> ClientConnection<T>::Create(
     ClientManager<T>& manager,
     boost::asio::io_service& io_service) {
   ClientConnection::pointer self = pointer(new ClientConnection(manager, io_service));
-  // Let our manager process our new connection.
-  // self->manager_.ProcessNewClient(self);
   return self;
 }
 
