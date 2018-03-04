@@ -49,20 +49,22 @@ public:
     // start first server
     ray::OMConfig om_config_1;
     om_config_1.store_socket_name = store_sock_1;
-    server1.reset(new Raylet(io_service,
-                                 std::string("hello1"),
-                                 resource_config,
-                                 om_config_1,
-                                 mock_gcs_client));
+    server1.reset(new Raylet(io_service_nm,
+                             io_service_nm,
+                             std::string("hello1"),
+                             resource_config,
+                             om_config_1,
+                             mock_gcs_client));
 
     // start second server
     ray::OMConfig om_config_2;
     om_config_2.store_socket_name = store_sock_2;
-    server2.reset(new Raylet(io_service,
-                                 std::string("hello2"),
-                                 resource_config,
-                                 om_config_2,
-                                 mock_gcs_client));
+    server2.reset(new Raylet(io_service_nm,
+                             io_service_nm,
+                             std::string("hello2"),
+                             resource_config,
+                             om_config_2,
+                             mock_gcs_client));
 
     // connect to stores.
     ARROW_CHECK_OK(client1.Connect(store_sock_1, "", PLASMA_DEFAULT_RELEASE_DELAY));
@@ -91,7 +93,7 @@ public:
   }
 
   void Loop(){
-    io_service.run();
+    io_service_nm.run();
   };
 
   void StartLoop(){
@@ -99,7 +101,7 @@ public:
   };
 
   void StopLoop(){
-    io_service.stop();
+    io_service_nm.stop();
     p.join();
   }
 
@@ -127,7 +129,8 @@ public:
  protected:
 
   std::thread p;
-  boost::asio::io_service io_service;
+  boost::asio::io_service io_service_nm;
+  // boost::asio::io_service io_service_om;
   shared_ptr<ray::GcsClient> mock_gcs_client;
   unique_ptr<ray::Raylet> server1;
   unique_ptr<ray::Raylet> server2;

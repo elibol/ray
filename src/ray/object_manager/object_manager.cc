@@ -161,6 +161,96 @@ ray::Status ObjectManager::Push(const ObjectID &object_id,
   return status;
 };
 
+ray::Status ObjectManager::QueuePush(const ObjectID &object_id_const,
+                                     SenderConnection::pointer conn){
+  ObjectID object_id = ObjectID(object_id_const);
+  if(conn->ObjectIdQueued(object_id)){
+    // For now, return with status OK if the object is already in the send queue.
+    return ray::Status::OK();
+  }
+  conn->QueueObjectId(object_id);
+  if(num_transfers_ < max_transfers_){
+    return ExecutePushQueue(conn);
+  }
+  return ray::Status::OK();
+};
+
+ray::Status ObjectManager::ExecutePushQueue(SenderConnection::pointer conn){
+  ray::Status status = ray::Status::OK();
+  while(num_transfers_ < max_transfers_){
+    if (conn->IsObjectIdQueueEmpty()){
+      return ray::Status::OK();
+    }
+    ObjectID object_id = conn->DeQueueObjectId();
+    // The threads that increment/decrement num_transfers_ are different.
+    // It's important to increment num_transfers_ before executing the push.
+    num_transfers_ += 1;
+    status = ExecutePushMeta(object_id, conn);
+  }
+  return status;
+};
+
+ray::Status ObjectManager::ExecutePushMeta(const ObjectID &object_id_const,
+                                           SenderConnection::pointer conn) {
+  ObjectID object_id = ObjectID(object_id_const);
+  // Allocate and append the request to the transfer queue.
+  plasma::ObjectBuffer object_buffer;
+  plasma::ObjectID plasma_id = object_id.to_plasma_id();
+  ARROW_CHECK_OK(store_client_->GetClientOther().Get(&plasma_id, 1, 0, &object_buffer));
+  if (object_buffer.data_size == -1) {
+    cout << "Failed to get object" << endl;
+    // If the object wasn't locally available, exit immediately. If the object
+    // later appears locally, the requesting plasma manager should request the
+    // transfer again.
+    return ray::Status::IOError("Unable to transfer object to requesting plasma manager, object not local.");
+  }
+  ARROW_CHECK(object_buffer.metadata->data() == object_buffer.data->data() + object_buffer.data_size);
+  SendRequest send_request;
+  send_request.object_id = object_id;
+  send_request.object_size = object_buffer.data_size;
+  send_request.data = const_cast<uint8_t *>(object_buffer.data->data());
+  conn->AddSendRequest(object_id, send_request);
+  // Create buffer.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto message = CreateObjectHeader(fbb, fbb.CreateString(object_id.binary()), send_request.object_size);
+  fbb.Finish(message);
+  // Pack into asio buffer.
+  size_t length = fbb.GetSize();
+  std::vector<boost::asio::const_buffer> buffer;
+  buffer.push_back(boost::asio::buffer(&length, sizeof(length)));
+  buffer.push_back(boost::asio::buffer(fbb.GetBufferPointer(), length));
+  // Send asynchronously.
+  boost::asio::async_write(conn->GetSocket(),
+                           buffer,
+                           boost::bind(&ObjectManager::ExecutePushObject,
+                                       this,
+                                       conn,
+                                       object_id,
+                                       boost::asio::placeholders::error));
+  return ray::Status::OK();
+};
+
+void ObjectManager::ExecutePushObject(SenderConnection::pointer conn,
+                                      const ObjectID &object_id,
+                                      const boost::system::error_code &header_ec){
+  SendRequest &send_request = conn->GetSendRequest(object_id);
+  boost::system::error_code ec;
+  boost::asio::write(conn->GetSocket(),
+                     boost::asio::buffer(send_request.data, (size_t) send_request.object_size),
+                     ec);
+  // Do this regardless of whether it failed or succeeded.
+  ARROW_CHECK_OK(store_client_->GetClientOther().Release(send_request.object_id.to_plasma_id()));
+
+  ray::Status ray_status = ExecutePushCompleted(object_id, conn);
+}
+
+ray::Status ObjectManager::ExecutePushCompleted(const ObjectID &object_id,
+                                                SenderConnection::pointer conn){
+  conn->RemoveSendRequest(object_id);
+  num_transfers_ -= 1;
+  return ExecutePushQueue(conn);
+};
+
 ray::Status ObjectManager::Cancel(const ObjectID &object_id) {
   // TODO(hme): Account for pull timers.
   ray::Status status = object_directory_->Cancel(object_id);
@@ -330,96 +420,6 @@ void ObjectManager::HandlePushReceive(TCPClientConnection::pointer conn, BoostEC
   }
   // Wait for another push.
   ray::Status ray_status = WaitPushReceive(conn);
-};
-
-ray::Status ObjectManager::QueuePush(const ObjectID &object_id_const,
-                                     SenderConnection::pointer conn){
-  ObjectID object_id = ObjectID(object_id_const);
-  if(conn->ObjectIdQueued(object_id)){
-    // For now, return with status OK if the object is already in the send queue.
-    return ray::Status::OK();
-  }
-  conn->QueueObjectId(object_id);
-  if(num_transfers_ < max_transfers_){
-    return ExecutePushQueue(conn);
-  }
-  return ray::Status::OK();
-};
-
-ray::Status ObjectManager::ExecutePushQueue(SenderConnection::pointer conn){
-  ray::Status status = ray::Status::OK();
-  while(num_transfers_ < max_transfers_){
-    if (conn->IsObjectIdQueueEmpty()){
-      return ray::Status::OK();
-    }
-    ObjectID object_id = conn->DeQueueObjectId();
-    // The threads that increment/decrement num_transfers_ are different.
-    // It's important to increment num_transfers_ before executing the push.
-    num_transfers_ += 1;
-    status = ExecutePushMeta(object_id, conn);
-  }
-  return status;
-};
-
-ray::Status ObjectManager::ExecutePushMeta(const ObjectID &object_id_const,
-                                       SenderConnection::pointer conn) {
-  ObjectID object_id = ObjectID(object_id_const);
-  // Allocate and append the request to the transfer queue.
-  plasma::ObjectBuffer object_buffer;
-  plasma::ObjectID plasma_id = object_id.to_plasma_id();
-  ARROW_CHECK_OK(store_client_->GetClientOther().Get(&plasma_id, 1, 0, &object_buffer));
-  if (object_buffer.data_size == -1) {
-    cout << "Failed to get object" << endl;
-    // If the object wasn't locally available, exit immediately. If the object
-    // later appears locally, the requesting plasma manager should request the
-    // transfer again.
-    return ray::Status::IOError("Unable to transfer object to requesting plasma manager, object not local.");
-  }
-  ARROW_CHECK(object_buffer.metadata->data() == object_buffer.data->data() + object_buffer.data_size);
-  SendRequest send_request;
-  send_request.object_id = object_id;
-  send_request.object_size = object_buffer.data_size;
-  send_request.data = const_cast<uint8_t *>(object_buffer.data->data());
-  conn->AddSendRequest(object_id, send_request);
-  // Create buffer.
-  flatbuffers::FlatBufferBuilder fbb;
-  auto message = CreateObjectHeader(fbb, fbb.CreateString(object_id.binary()), send_request.object_size);
-  fbb.Finish(message);
-  // Pack into asio buffer.
-  size_t length = fbb.GetSize();
-  std::vector<boost::asio::const_buffer> buffer;
-  buffer.push_back(boost::asio::buffer(&length, sizeof(length)));
-  buffer.push_back(boost::asio::buffer(fbb.GetBufferPointer(), length));
-  // Send asynchronously.
-  boost::asio::async_write(conn->GetSocket(),
-                           buffer,
-                           boost::bind(&ObjectManager::ExecutePushObject,
-                                       this,
-                                       conn,
-                                       object_id,
-                                       boost::asio::placeholders::error));
-  return ray::Status::OK();
-};
-
-void ObjectManager::ExecutePushObject(SenderConnection::pointer conn,
-                                       const ObjectID &object_id,
-                                       const boost::system::error_code &header_ec){
-  SendRequest &send_request = conn->GetSendRequest(object_id);
-  boost::system::error_code ec;
-  boost::asio::write(conn->GetSocket(),
-                     boost::asio::buffer(send_request.data, (size_t) send_request.object_size),
-                     ec);
-  // Do this regardless of whether it failed or succeeded.
-  ARROW_CHECK_OK(store_client_->GetClientOther().Release(send_request.object_id.to_plasma_id()));
-
-  ray::Status ray_status = ExecutePushCompleted(object_id, conn);
-}
-
-ray::Status ObjectManager::ExecutePushCompleted(const ObjectID &object_id,
-                                                SenderConnection::pointer conn){
-  conn->RemoveSendRequest(object_id);
-  num_transfers_ -= 1;
-  return ExecutePushQueue(conn);
 };
 
 ray::Status ObjectManager::WaitMessage(TCPClientConnection::pointer conn){

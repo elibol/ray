@@ -27,11 +27,12 @@ class Raylet {
   /// \param object_manager_config Configuration to initialize the object
   /// manager.
   /// \param gcs_client A client connection to the GCS.
-  Raylet(boost::asio::io_service& io_service,
-             const std::string &socket_name,
-             const ResourceSet &resource_config,
-             const OMConfig &object_manager_config,
-             std::shared_ptr<ray::GcsClient> gcs_client);
+  Raylet(boost::asio::io_service& io_service_nm,
+         boost::asio::io_service& io_service_om,
+         const std::string &socket_name,
+         const ResourceSet &resource_config,
+         const OMConfig &object_manager_config,
+         std::shared_ptr<ray::GcsClient> gcs_client);
 
   /// Destroy the NodeServer.
   ~Raylet();
