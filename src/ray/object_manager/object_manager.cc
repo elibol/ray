@@ -268,7 +268,6 @@ ray::Status ObjectManager::Wait(const vector<ObjectID> &object_ids,
 ray::Status ObjectManager::GetMsgConnection(
     const ClientID &client_id,
     std::function<void(SenderConnection::pointer)> callback){
-
   ray::Status status = Status::OK();
   if(message_send_connections_.count(client_id) > 0){
     callback(message_send_connections_[client_id]);
@@ -350,7 +349,7 @@ ray::Status ObjectManager::CreateTransferConnection(const RemoteConnectionInfo &
   return Status::OK();
 };
 
-ray::Status ObjectManager::AcceptConnection(TCPClientConnection::pointer conn){
+void ObjectManager::ProcessNewClient(std::shared_ptr<TcpClientConnection> conn){
   boost::system::error_code ec;
   // read header
   size_t length;
@@ -369,17 +368,22 @@ ray::Status ObjectManager::AcceptConnection(TCPClientConnection::pointer conn){
   if (is_transfer) {
     transfer_receive_connections_[client_id] = conn;
     Status status = WaitPushReceive(conn);
-    return status;
+    RAY_CHECK_OK(status);
+    // return status;
   } else {
     message_receive_connections_[client_id] = conn;
     Status status = WaitMessage(conn);
-    return status;
+    RAY_CHECK_OK(status);
   }
 };
 
-ray::Status ObjectManager::WaitPushReceive(TCPClientConnection::pointer conn){
+
+//ray::Status ObjectManager::AcceptConnection(TCPClientConnection::pointer conn){
+//};
+
+ray::Status ObjectManager::WaitPushReceive(std::shared_ptr<TcpClientConnection> conn){
   boost::asio::async_read(conn->GetSocket(),
-                          boost::asio::buffer(&conn->message_length_, sizeof(conn->message_length_)),
+                          boost::asio::buffer(&conn->read_length_, sizeof(conn->read_length_)),
                           boost::bind(&ObjectManager::HandlePushReceive,
                                       this,
                                       conn,
@@ -387,9 +391,9 @@ ray::Status ObjectManager::WaitPushReceive(TCPClientConnection::pointer conn){
   return ray::Status::OK();
 }
 
-void ObjectManager::HandlePushReceive(TCPClientConnection::pointer conn, BoostEC length_ec){
+void ObjectManager::HandlePushReceive(std::shared_ptr<TcpClientConnection> conn, BoostEC length_ec){
   std::vector<uint8_t> message;
-  message.resize(conn->message_length_);
+  message.resize(conn->read_length_);
   boost::system::error_code ec;
   boost::asio::read(conn->GetSocket(), boost::asio::buffer(message), ec);
   // Serialize.
@@ -422,9 +426,9 @@ void ObjectManager::HandlePushReceive(TCPClientConnection::pointer conn, BoostEC
   ray::Status ray_status = WaitPushReceive(conn);
 };
 
-ray::Status ObjectManager::WaitMessage(TCPClientConnection::pointer conn){
+ray::Status ObjectManager::WaitMessage(std::shared_ptr<TcpClientConnection> conn){
   boost::asio::async_read(conn->GetSocket(),
-                          boost::asio::buffer(&conn->message_type_, sizeof(conn->message_type_)),
+                          boost::asio::buffer(&conn->read_type_, sizeof(conn->read_type_)),
                           boost::bind(&ObjectManager::HandleMessage,
                                       this,
                                       conn,
@@ -432,20 +436,20 @@ ray::Status ObjectManager::WaitMessage(TCPClientConnection::pointer conn){
   return ray::Status::OK();
 }
 
-void ObjectManager::HandleMessage(TCPClientConnection::pointer conn, BoostEC msg_ec){
-  switch(conn->message_type_){
+void ObjectManager::HandleMessage(std::shared_ptr<TcpClientConnection> conn, BoostEC msg_ec){
+  switch(conn->read_type_){
     case OMMessageType_PullRequest:
       ReceivePullRequest(conn);
   }
 }
 
-void ObjectManager::ReceivePullRequest(TCPClientConnection::pointer conn){
+void ObjectManager::ReceivePullRequest(std::shared_ptr<TcpClientConnection> conn){
   boost::asio::read(conn->GetSocket(),
-                    boost::asio::buffer(&conn->message_length_,
-                                        sizeof(conn->message_length_))
+                    boost::asio::buffer(&conn->read_length_,
+                                        sizeof(conn->read_length_))
   );
   std::vector<uint8_t> message;
-  message.resize(conn->message_length_);
+  message.resize(conn->read_length_);
   boost::system::error_code ec;
   boost::asio::read(conn->GetSocket(), boost::asio::buffer(message), ec);
   // Serialize.
@@ -456,5 +460,12 @@ void ObjectManager::ReceivePullRequest(TCPClientConnection::pointer conn){
   ray::Status push_status = Push(object_id, client_id);
   ray::Status wait_status = WaitMessage(conn);
 }
+
+void ObjectManager::ProcessClientMessage(std::shared_ptr<TcpClientConnection> client,
+                                         int64_t message_type,
+                                         const uint8_t *message){
+  cout << "wat?" << endl;
+};
+
 
 } // end ray

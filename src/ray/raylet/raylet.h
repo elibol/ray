@@ -37,7 +37,7 @@ class Raylet {
   /// Destroy the NodeServer.
   ~Raylet();
 
-  // TODO(melih): Get rid of this method.
+  // TODO(hme): Remove this method.
   ObjectManager &GetObjectManager();
 
  private:
@@ -50,7 +50,7 @@ class Raylet {
   /// Accept a tcp client connection.
   void DoAcceptTcp();
   /// Handle an accepted tcp client connection.
-  void HandleAcceptTcp(TCPClientConnection::pointer new_connection,
+  void HandleAcceptTcp(TcpClientConnection::pointer new_connection,
                        const boost::system::error_code& error);
 
   /// An acceptor for new clients.

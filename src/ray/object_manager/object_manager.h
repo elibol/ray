@@ -26,7 +26,7 @@
 
 #include "om_client_connection.h"
 
-// #include "ray/common/client_connection.h"
+#include "ray/common/client_connection.h"
 
 namespace ray {
 
@@ -43,7 +43,7 @@ struct OMConfig {
 // TODO(hme): Add success/failure callbacks for push and pull.
 // TODO(hme): Use boost thread pool.
 // TODO(hme): Add incoming connections to io_service tied to thread pool.
-class ObjectManager {
+class ObjectManager : public ClientManager<boost::asio::ip::tcp> {
 
  public:
 
@@ -107,8 +107,10 @@ class ObjectManager {
   /// Add a connection to a remote object manager.
   /// This is invoked by an external server.
   /// \param conn The connection.
-  /// \return Status of whether the connection was successfully established.
-  ray::Status AcceptConnection(TCPClientConnection::pointer conn);
+  void ProcessNewClient(std::shared_ptr<TcpClientConnection> conn) override;
+  void ProcessClientMessage(std::shared_ptr<TcpClientConnection> client,
+                            int64_t message_type,
+                            const uint8_t *message) override;
 
   /// Cancels all requests (Push/Pull) associated with the given ObjectID.
   /// \param object_id The ObjectID.
@@ -183,10 +185,10 @@ class ObjectManager {
                      ray::UniqueIDHasher> transfer_send_connections_;
 
   std::unordered_map<ray::ClientID,
-                     TCPClientConnection::pointer,
+                     std::shared_ptr<TcpClientConnection>,
                      ray::UniqueIDHasher> message_receive_connections_;
   std::unordered_map<ray::ClientID,
-                     TCPClientConnection::pointer,
+                     std::shared_ptr<TcpClientConnection>,
                      ray::UniqueIDHasher> transfer_receive_connections_;
 
   /// Handle starting, running, and stopping asio io_service.
@@ -254,17 +256,17 @@ class ObjectManager {
 
   /// A socket connection doing an asynchronous read on a transfer connection that was
   /// added by AcceptConnection.
-  ray::Status WaitPushReceive(TCPClientConnection::pointer conn);
+  ray::Status WaitPushReceive(std::shared_ptr<TcpClientConnection> conn);
   /// Invoked when a remote object manager pushes an object to this object manager.
-  void HandlePushReceive(TCPClientConnection::pointer conn, BoostEC length_ec);
+  void HandlePushReceive(std::shared_ptr<TcpClientConnection> conn, BoostEC length_ec);
 
   /// A socket connection doing an asynchronous read on a message connection that was
   /// added by AcceptConnection.
-  ray::Status WaitMessage(TCPClientConnection::pointer conn);
+  ray::Status WaitMessage(std::shared_ptr<TcpClientConnection> conn);
   /// Handle messages.
-  void HandleMessage(TCPClientConnection::pointer conn, BoostEC msg_ec);
+  void HandleMessage(std::shared_ptr<TcpClientConnection> conn, BoostEC msg_ec);
   /// Process the receive pull request message.
-  void ReceivePullRequest(TCPClientConnection::pointer conn);
+  void ReceivePullRequest(std::shared_ptr<TcpClientConnection> conn);
 
   /// Register object add with directory.
   void NotifyDirectoryObjectAdd(const ObjectID &object_id);

@@ -45,18 +45,19 @@ ClientID Raylet::RegisterGcs(){
 }
 
 void Raylet::DoAcceptTcp() {
-  TCPClientConnection::pointer new_connection = TCPClientConnection::Create(acceptor_.get_io_service());
+  TcpClientConnection::pointer new_connection = TcpClientConnection::Create(
+      object_manager_,
+      tcp_acceptor_.get_io_service());
   tcp_acceptor_.async_accept(
       new_connection->GetSocket(),
       boost::bind(&Raylet::HandleAcceptTcp, this, new_connection, boost::asio::placeholders::error)
   );
 }
 
-void Raylet::HandleAcceptTcp(TCPClientConnection::pointer new_connection,
-                                 const boost::system::error_code& error) {
+void Raylet::HandleAcceptTcp(TcpClientConnection::pointer new_connection,
+                             const boost::system::error_code& error) {
   if (!error) {
-    // Pass it off to object manager for now.
-    ray::Status status = object_manager_.AcceptConnection(std::move(new_connection));
+    object_manager_.ProcessNewClient(std::move(new_connection));
   }
   DoAcceptTcp();
 }
