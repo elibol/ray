@@ -29,22 +29,6 @@ ClientConnection<T>::ClientConnection(
 }
 
 template <class T>
-shared_ptr<ClientConnection<T>> ClientConnection<T>::Create(
-    ClientManager<T>& manager,
-    boost::asio::io_service& io_service) {
-  ClientConnection::pointer self = pointer(new ClientConnection(manager, io_service));
-  return self;
-}
-
-template <class T>
-ClientConnection<T>::ClientConnection(
-    ClientManager<T>& manager,
-    boost::asio::io_service& io_service)
-    : socket_(io_service),
-      manager_(manager) {
-}
-
-template <class T>
 boost::asio::basic_stream_socket<T> &ClientConnection<T>::GetSocket(){
   return socket_;
 }

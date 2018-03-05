@@ -21,23 +21,14 @@ class ClientConnection : public std::enable_shared_from_this<ClientConnection<T>
 
  public:
 
-  typedef std::shared_ptr<ClientConnection<T>> pointer;
-
   /// Allocate a new node client connection.
   ///
   /// \param ClientManager A reference to the manager that will process a
   /// message from this client.
   /// \param socket The client socket.
   /// \return std::shared_ptr<ClientConnection>.
-  static pointer Create(ClientManager<T>& manager,
-                        boost::asio::basic_stream_socket<T> &&socket);
-
-  /// Allocate a new node client connection.
-  /// \param ClientManager A reference to the manager that will process a
-  /// \param io_service The asio io_service.
-  /// message from this client.
-  static pointer Create(ClientManager<T>& manager,
-                        boost::asio::io_service& io_service);
+  static std::shared_ptr<ClientConnection<T>> Create(ClientManager<T>& manager,
+                                                     boost::asio::basic_stream_socket<T> &&socket);
 
   /// Listen for and process messages from the client connection. Once a
   /// message has been fully received, the client manager's
@@ -52,6 +43,7 @@ class ClientConnection : public std::enable_shared_from_this<ClientConnection<T>
   /// the ClientConnection's buffer.
   void WriteMessage(int64_t type, size_t length, const uint8_t *message);
 
+  // TODO(hme): Remove GetSocket() and add synchronous Read/Write interfaces.
   /// \return The socket associated with this connection.
   boost::asio::basic_stream_socket<T> &GetSocket();
 
@@ -60,8 +52,6 @@ class ClientConnection : public std::enable_shared_from_this<ClientConnection<T>
   ClientConnection(
       ClientManager<T>& manager,
       boost::asio::basic_stream_socket<T> &&socket);
-  /// A private constructor for a node client connection.
-  ClientConnection(ClientManager<T>& manager, boost::asio::io_service& io_service);
   /// Process an error from the last operation, then process the  message
   /// header from the client.
   void processMessageHeader(const boost::system::error_code& error);

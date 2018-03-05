@@ -50,8 +50,7 @@ class Raylet {
   /// Accept a tcp client connection.
   void DoAcceptTcp();
   /// Handle an accepted tcp client connection.
-  void HandleAcceptTcp(TcpClientConnection::pointer new_connection,
-                       const boost::system::error_code& error);
+  void HandleAcceptTcp(const boost::system::error_code& error);
 
   /// An acceptor for new clients.
   boost::asio::local::stream_protocol::acceptor acceptor_;

@@ -45,19 +45,18 @@ ClientID Raylet::RegisterGcs(){
 }
 
 void Raylet::DoAcceptTcp() {
-  TcpClientConnection::pointer new_connection = TcpClientConnection::Create(
-      object_manager_,
-      tcp_acceptor_.get_io_service());
   tcp_acceptor_.async_accept(
-      new_connection->GetSocket(),
-      boost::bind(&Raylet::HandleAcceptTcp, this, new_connection, boost::asio::placeholders::error)
+      // There is some asio magic that allows for the same socket to be used
+      // repeatedly.
+      tcp_socket_,
+      boost::bind(&Raylet::HandleAcceptTcp, this, boost::asio::placeholders::error)
   );
 }
 
-void Raylet::HandleAcceptTcp(TcpClientConnection::pointer new_connection,
-                             const boost::system::error_code& error) {
+void Raylet::HandleAcceptTcp(const boost::system::error_code& error) {
   if (!error) {
-    object_manager_.ProcessNewClient(std::move(new_connection));
+    auto new_connection = TcpClientConnection::Create(object_manager_, std::move(tcp_socket_));
+    object_manager_.ProcessNewClient(new_connection);
   }
   DoAcceptTcp();
 }

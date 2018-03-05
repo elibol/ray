@@ -399,6 +399,7 @@ void ObjectManager::ReceivePullRequest(std::shared_ptr<TcpClientConnection> &con
   ray::Status push_status = Push(object_id, client_id);
 };
 
+// TODO(hme): Use ProcessClientMessage.
 ray::Status ObjectManager::WaitPushReceive(std::shared_ptr<TcpClientConnection> conn){
   boost::asio::async_read(conn->GetSocket(),
                           boost::asio::buffer(&read_length_, sizeof(read_length_)),
