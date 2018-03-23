@@ -543,6 +543,8 @@ typedef enum {
  * (see scheduling_state) and the ID of the local scheduler it is scheduled on
  * or running on. */
 
+namespace legacy {
+
 struct Task {
   /** The scheduling state of the task. */
   int state;
@@ -552,6 +554,8 @@ struct Task {
   std::unique_ptr<TaskExecutionSpec> execution_spec;
 };
 
+}
+
 /**
  * Allocate a new task. Must be freed with free_task after use.
  *
@@ -560,13 +564,13 @@ struct Task {
  * @param local_scheduler_id The ID of the local scheduler that the task is
  *        scheduled on, if any.
  */
-Task *Task_alloc(const TaskSpec *spec,
+legacy::Task *Task_alloc(const TaskSpec *spec,
                  int64_t task_spec_size,
                  int state,
                  DBClientID local_scheduler_id,
                  const std::vector<ObjectID> &execution_dependencies);
 
-Task *Task_alloc(TaskExecutionSpec &execution_spec,
+legacy::Task *Task_alloc(TaskExecutionSpec &execution_spec,
                  int state,
                  DBClientID local_scheduler_id);
 
@@ -576,29 +580,29 @@ Task *Task_alloc(TaskExecutionSpec &execution_spec,
  * @param other The task that will be copied.
  * @returns Pointer to the copy of the task.
  */
-Task *Task_copy(Task *other);
+legacy::Task *Task_copy(legacy::Task *other);
 
 /** Size of task structure in bytes. */
-int64_t Task_size(Task *task);
+int64_t Task_size(legacy::Task *task);
 
 /** The scheduling state of the task. */
-int Task_state(Task *task);
+int Task_state(legacy::Task *task);
 
 /** Update the schedule state of the task. */
-void Task_set_state(Task *task, int state);
+void Task_set_state(legacy::Task *task, int state);
 
 /** Local scheduler this task has been assigned to or is running on. */
-DBClientID Task_local_scheduler(Task *task);
+DBClientID Task_local_scheduler(legacy::Task *task);
 
 /** Set the local scheduler ID for this task. */
-void Task_set_local_scheduler(Task *task, DBClientID local_scheduler_id);
+void Task_set_local_scheduler(legacy::Task *task, DBClientID local_scheduler_id);
 
-TaskExecutionSpec *Task_task_execution_spec(Task *task);
+TaskExecutionSpec *Task_task_execution_spec(legacy::Task *task);
 
 /** Task ID of this task. */
-TaskID Task_task_id(Task *task);
+TaskID Task_task_id(legacy::Task *task);
 
 /** Free this task datastructure. */
-void Task_free(Task *task);
+void Task_free(legacy::Task *task);
 
 #endif /* TASK_H */

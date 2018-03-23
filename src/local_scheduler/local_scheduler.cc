@@ -28,6 +28,8 @@
 #include "state/object_table.h"
 #include "state/error_table.h"
 
+using namespace legacy;
+
 /**
  * A helper function for printing available and requested resource information.
  *

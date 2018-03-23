@@ -30,6 +30,8 @@ extern "C" {
 
 #include "common_protocol.h"
 
+using namespace legacy;
+
 #ifndef _WIN32
 /* This function is actually not declared in standard POSIX, so declare it. */
 extern int usleep(useconds_t usec);

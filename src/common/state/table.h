@@ -35,7 +35,7 @@ class CommonCallbackData : public BaseCallbackData {
  * task cleanup in the destructor. */
 class TaskCallbackData : public BaseCallbackData {
  public:
-  TaskCallbackData(Task *task_data);
+  TaskCallbackData(legacy::Task *task_data);
   ~TaskCallbackData(void);
 };
 

@@ -12,6 +12,9 @@
 #include "hiredis/hiredis.h"
 #include "state/redis.h"
 
+// Okay here since this is a test.
+using namespace legacy;
+
 #ifndef _WIN32
 /* This function is actually not declared in standard POSIX, so declare it. */
 extern int usleep(useconds_t usec);

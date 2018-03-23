@@ -243,7 +243,7 @@ using CustomSerializerTable = Table<ClassID, CustomSerializerData>;
 
 using ConfigTable = Table<ConfigID, ConfigTableData>;
 
-Status TaskTableAdd(AsyncGcsClient *gcs_client, Task *task);
+Status TaskTableAdd(AsyncGcsClient *gcs_client, legacy::Task *task);
 
 Status TaskTableTestAndUpdate(AsyncGcsClient *gcs_client, const TaskID &task_id,
                               const ClientID &local_scheduler_id, int test_state_bitmask,

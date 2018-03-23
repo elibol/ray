@@ -8,6 +8,8 @@ extern "C" {
 #include "sha256.h"
 }
 
+using namespace legacy;
+
 ObjectID task_compute_return_id(TaskID task_id, int64_t return_index) {
   /* Here, return_indices need to be >= 0, so we can use negative
    * indices for put. */

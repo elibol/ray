@@ -68,7 +68,7 @@ typedef struct {
   std::unordered_map<ObjectID, SchedulerObjectInfo, UniqueIDHasher>
       scheduler_object_info_table;
   /** An array of tasks that haven't been scheduled yet. */
-  std::vector<Task *> pending_tasks;
+  std::vector<legacy::Task *> pending_tasks;
 } GlobalSchedulerState;
 
 /**
@@ -93,7 +93,7 @@ LocalScheduler *get_local_scheduler(GlobalSchedulerState *state,
  * @return Void.
  */
 void assign_task_to_local_scheduler(GlobalSchedulerState *state,
-                                    Task *task,
+                                    legacy::Task *task,
                                     DBClientID local_scheduler_id);
 
 #endif /* GLOBAL_SCHEDULER_H */

@@ -102,7 +102,7 @@ struct LocalSchedulerClient {
   /** A pointer to the task object that is currently running on this client. If
    *  no task is running on the worker, this will be NULL. This is used to
    *  update the task table. */
-  Task *task_in_progress;
+  legacy::Task *task_in_progress;
   /** An array of resource counts currently in use by the worker.  */
   std::unordered_map<std::string, double> resources_in_use;
   /** A vector of the IDs of the GPUs that the worker is currently using. If the

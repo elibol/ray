@@ -3,6 +3,9 @@
 
 #include "task.h"
 
+// Okay here since this is a test.
+using namespace legacy;
+
 extern TaskBuilder *g_task_builder;
 
 const int64_t arg_value_size = 1000;

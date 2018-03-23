@@ -3,6 +3,8 @@
 #include "common_protocol.h"
 #include "redis.h"
 
+using namespace legacy;
+
 void local_scheduler_table_subscribe(
     DBHandle *db_handle,
     local_scheduler_table_subscribe_callback subscribe_callback,

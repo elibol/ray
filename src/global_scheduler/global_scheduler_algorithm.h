@@ -75,7 +75,7 @@ void GlobalSchedulerPolicyState_free(GlobalSchedulerPolicyState *policy_state);
  */
 bool handle_task_waiting(GlobalSchedulerState *state,
                          GlobalSchedulerPolicyState *policy_state,
-                         Task *task);
+                         legacy::Task *task);
 
 /**
  * Handle the fact that a new object is available.

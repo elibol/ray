@@ -43,6 +43,8 @@
 #include "state/db_client_table.h"
 #include "ray/gcs/client.h"
 
+using namespace legacy;
+
 int handle_sigpipe(plasma::Status s, int fd) {
   if (s.ok()) {
     return 0;

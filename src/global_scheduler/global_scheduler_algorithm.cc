@@ -5,6 +5,8 @@
 
 #include "global_scheduler_algorithm.h"
 
+using namespace legacy;
+
 GlobalSchedulerPolicyState *GlobalSchedulerPolicyState_init(void) {
   GlobalSchedulerPolicyState *policy_state = new GlobalSchedulerPolicyState();
   return policy_state;

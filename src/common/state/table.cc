@@ -4,6 +4,8 @@
 #include <inttypes.h>
 #include "redis.h"
 
+using namespace legacy;
+
 BaseCallbackData::BaseCallbackData(void *data) {
   data_ = data;
 }

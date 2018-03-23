@@ -13,6 +13,8 @@
 #include "state/table.h"
 #include "state/task_table.h"
 
+using namespace legacy;
+
 /**
  * Retry the task assignment. If the local scheduler that the task is assigned
  * to is no longer active, do not retry the assignment.

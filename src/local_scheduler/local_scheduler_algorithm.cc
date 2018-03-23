@@ -14,6 +14,8 @@
 #include "local_scheduler.h"
 #include "common/task.h"
 
+using namespace legacy;
+
 /* Declared for convenience. */
 void remove_actor(SchedulingAlgorithmState *algorithm_state, ActorID actor_id);
 

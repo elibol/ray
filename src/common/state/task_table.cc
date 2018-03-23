@@ -3,6 +3,8 @@
 
 #define NUM_DB_REQUESTS 2
 
+using namespace legacy;
+
 void task_table_get_task(DBHandle *db_handle,
                          TaskID task_id,
                          RetryInfo *retry,

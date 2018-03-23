@@ -9,6 +9,8 @@
 // part that depends on the Task* datasturcture from the build. This should be
 // merged with tables.cc once we get rid of the Task* datastructure.
 
+using namespace legacy;
+
 namespace {
 
 std::shared_ptr<TaskTableDataT> MakeTaskTableData(const TaskExecutionSpec &execution_spec,
