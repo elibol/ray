@@ -103,10 +103,16 @@ class MultinodeObjectManagerTest {
 
   MultinodeObjectManagerTest(std::string node_ip_address,
                              std::string redis_address,
-                             int redis_port) {
+                             int redis_port,
+                             int num_threads,
+                             int max_sends,
+                             int max_receives) {
     SetUp(node_ip_address,
           redis_address,
-          redis_port);
+          redis_port,
+          num_threads,
+          max_sends,
+          max_receives);
   }
 
   std::string StartStore(const std::string &id) {
@@ -125,7 +131,10 @@ class MultinodeObjectManagerTest {
 
   void SetUp(std::string node_ip_address,
              std::string redis_address,
-             int redis_port) {
+             int redis_port,
+             int num_threads,
+             int max_sends,
+             int max_receives) {
 
     object_manager_service_1.reset(new boost::asio::io_service());
 
@@ -137,9 +146,9 @@ class MultinodeObjectManagerTest {
     ObjectManagerConfig om_config_1;
     om_config_1.store_socket_name = store_sock_1;
     // good enough settings for m4.16xlarge
-    om_config_1.num_threads = 64;
-    om_config_1.max_sends = 32;
-    om_config_1.max_receives = 32;
+    om_config_1.num_threads = num_threads;
+    om_config_1.max_sends = max_sends;
+    om_config_1.max_receives = max_receives;
     server1.reset(new MockServer(main_service,
                                  node_ip_address,
                                  redis_address,
@@ -285,6 +294,10 @@ int main(int argc, char **argv) {
   int object_size = std::stoi(argv[6]);
   int num_objects = std::stoi(argv[7]);
 
+  int num_threads = std::stoi(argv[8]);
+  int max_sends = std::stoi(argv[9]);
+  int max_receives = std::stoi(argv[10]);
+
   RAY_LOG(INFO) <<"\n"
       << "node_ip_address=" << node_ip_address << "\n"
       << "redis_address=" << redis_address << "\n"
@@ -296,7 +309,10 @@ int main(int argc, char **argv) {
 
   MultinodeObjectManagerTest om(node_ip_address,
                                 redis_address,
-                                redis_port);
+                                redis_port,
+                                num_threads,
+                                max_sends,
+                                max_receives);
 
   om.ConnectAndExecute(mode, object_size, num_objects);
   om.main_service.run();
