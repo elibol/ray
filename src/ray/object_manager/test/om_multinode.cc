@@ -109,7 +109,7 @@ class MultinodeObjectManagerTest {
   std::string StartStore(const std::string &id) {
     std::string store_id = "/tmp/store";
     store_id = store_id + id;
-    std::string plasma_command = store_executable + " -m 15000000000 -s " + store_id +
+    std::string plasma_command = store_executable + " -m 20000000000 -s " + store_id +
         " 1> /dev/null 2> /dev/null &";
     RAY_LOG(DEBUG) << plasma_command;
     int ec = system(plasma_command.c_str());
@@ -178,7 +178,6 @@ class MultinodeObjectManagerTest {
         send_object_ids.insert(oid);
       }
     }
-    sleep(1);
     ClientID client_id_1 = gcs_client_1->client_table().GetLocalClientId();
     RAY_LOG(INFO) << "local client_id " << client_id_1;
     gcs_client_1->client_table().RegisterClientAddedCallback(
