@@ -132,9 +132,10 @@ class MultinodeObjectManagerTest {
     gcs_client_1 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
     ObjectManagerConfig om_config_1;
     om_config_1.store_socket_name = store_sock_1;
-    om_config_1.num_threads = 4;
-    om_config_1.max_sends = 20;
-    om_config_1.max_receives = 20;
+    // good enough settings for m4.16xlarge
+    om_config_1.num_threads = 32;
+    om_config_1.max_sends = 16;
+    om_config_1.max_receives = 16;
     server1.reset(new MockServer(main_service,
                                  node_ip_address,
                                  redis_address,
@@ -168,6 +169,16 @@ class MultinodeObjectManagerTest {
   }
 
   void ConnectAndExecute(std::string mode, int object_size, int num_objects) {
+    if (mode == "send"){
+      // Create the objects to send before connecting.
+      // The receiver will start timing as soon as the sender connects,
+      // so we want to make sure we're not timing object creation.
+      for (int i=0;i<num_objects;++i) {
+        ObjectID oid = WriteDataToClient(client1, object_size);
+        send_object_ids.insert(oid);
+      }
+    }
+
     ClientID client_id_1 = gcs_client_1->client_table().GetLocalClientId();
     RAY_LOG(INFO) << "local client_id " << client_id_1;
     gcs_client_1->client_table().RegisterClientAddedCallback(
@@ -218,29 +229,23 @@ class MultinodeObjectManagerTest {
           );
       RAY_CHECK_OK(status);
     } else if (mode == "send"){
-      std::unordered_set<ObjectID, UniqueIDHasher> sent_object_ids;
-      for (int i=0;i<num_objects;++i) {
-        ObjectID oid = WriteDataToClient(client1, object_size);
-        sent_object_ids.insert(oid);
-      }
       status =
           server1->object_manager_.SubscribeObjAdded(
-              [this, remote_client_id, sent_object_ids, object_size, num_objects](const ObjectID &incoming_object_id) {
-                if (sent_object_ids.count(incoming_object_id) != 0) {
+              [this, remote_client_id, send_object_ids, object_size, num_objects](const ObjectID &incoming_object_id) {
+                if (send_object_ids.count(incoming_object_id) != 0) {
                   // start when we receive an ObjectID we didn't send.
                   // this is the small object sent from the receiver.
                   return;
                 }
                 RAY_LOG(INFO) << "received " << incoming_object_id;
                 int64_t start_time = current_time_ms();
-                // wait for object from receiver before sending.
-                for (auto oid : sent_object_ids) {
+                for (auto oid : send_object_ids) {
                   ray::Status async_status = server1->object_manager_.Push(oid, remote_client_id);
                   RAY_CHECK_OK(async_status);
                 }
                 int64_t elapsed = current_time_ms() - start_time;
                 RAY_LOG(INFO) << "elapsed " << elapsed;
-                for (auto oid : sent_object_ids) {
+                for (auto oid : send_object_ids) {
                   RAY_LOG(INFO) << "sent " << oid;
                 }
               }
@@ -254,6 +259,8 @@ class MultinodeObjectManagerTest {
   boost::asio::io_service main_service;
 
  protected:
+  std::unordered_set<ObjectID, UniqueIDHasher> send_object_ids;
+
   std::thread p;
   std::unique_ptr<boost::asio::io_service> object_manager_service_1;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_1;
