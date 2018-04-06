@@ -185,7 +185,7 @@ class MultinodeObjectManagerTest {
       // send a small object to initiate the send from sending side.
       ObjectID oid = WriteDataToClient(client1, 1);
       status = server1->object_manager_.Push(oid, remote_client_id);
-      RAY_LOG(INFO) << "sent " << remote_client_id;
+      RAY_LOG(INFO) << "sent " << oid;
       // start timer now since the sender will start sending as soon as it receives
       // the small object.
       int64_t start_time = current_time_ms();
@@ -201,6 +201,11 @@ class MultinodeObjectManagerTest {
                   RAY_LOG(INFO) << "elapsed milliseconds " << elapsed;
                   RAY_LOG(INFO) << "GBits transferred " << gbits;
                   RAY_LOG(INFO) << "GBits/sec " << gbits_sec;
+
+                  for (auto v1oid : v1) {
+                    RAY_LOG(INFO) << "received " << v1oid;
+                  }
+
                   TearDown();
                 }
               }
@@ -224,6 +229,9 @@ class MultinodeObjectManagerTest {
                 }
                 int64_t elapsed = current_time_ms() - start_time;
                 RAY_LOG(INFO) << "elapsed " << elapsed;
+                for (auto oid : oids) {
+                  RAY_LOG(INFO) << "sent " << oid;
+                }
               }
           );
       RAY_CHECK_OK(status);
