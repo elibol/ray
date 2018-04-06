@@ -109,7 +109,7 @@ class MultinodeObjectManagerTest {
   std::string StartStore(const std::string &id) {
     std::string store_id = "/tmp/store";
     store_id = store_id + id;
-    std::string plasma_command = store_executable + " -m 20000000000 -s " + store_id +
+    std::string plasma_command = store_executable + " -m 32000000000 -s " + store_id +
         " 1> /dev/null 2> /dev/null &";
     RAY_LOG(DEBUG) << plasma_command;
     int ec = system(plasma_command.c_str());
