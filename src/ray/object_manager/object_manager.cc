@@ -496,8 +496,10 @@ ray::Status ObjectManager::ExecuteReceiveObject(
     buffer.push_back(asio::buffer(mutable_data, object_size));
     conn->ReadBuffer(buffer, ec);
     if (!ec.value()) {
+      seal_mutex.lock();
       ARROW_CHECK_OK(store_client->Seal(plasma_id));
       ARROW_CHECK_OK(store_client->Release(plasma_id));
+      seal_mutex.unlock();
     } else {
       ARROW_CHECK_OK(store_client->Release(plasma_id));
       ARROW_CHECK_OK(store_client->Abort(plasma_id));
