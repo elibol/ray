@@ -137,9 +137,9 @@ class MultinodeObjectManagerTest {
     ObjectManagerConfig om_config_1;
     om_config_1.store_socket_name = store_sock_1;
     // good enough settings for m4.16xlarge
-    om_config_1.num_threads = 32;
-    om_config_1.max_sends = 16;
-    om_config_1.max_receives = 16;
+    om_config_1.num_threads = 64;
+    om_config_1.max_sends = 32;
+    om_config_1.max_receives = 32;
     server1.reset(new MockServer(main_service,
                                  node_ip_address,
                                  redis_address,
