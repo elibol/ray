@@ -185,15 +185,19 @@ class MultinodeObjectManagerTest {
     ray::Status status = ray::Status::OK();
     if (mode == "receive"){
       // send a small object to initiate the send from sending side.
-      ObjectID oid = WriteDataToClient(client1, 1);
-      status = server1->object_manager_.Push(oid, remote_client_id);
-      RAY_LOG(INFO) << "sent " << oid;
+      ObjectID init_object = WriteDataToClient(client1, 1);
+      status = server1->object_manager_.Push(init_object, remote_client_id);
+      RAY_LOG(INFO) << "sent " << init_object;
       // start timer now since the sender will start sending as soon as it receives
       // the small object.
       int64_t start_time = current_time_ms();
       status =
           server1->object_manager_.SubscribeObjAdded(
-              [this, start_time, object_size, num_objects](const ObjectID &object_id) {
+              [this, init_object, start_time, object_size, num_objects](const ObjectID &object_id) {
+                if (init_object == object_id){
+                  // ignore the initial object we sent out to start the experiment.
+                  return;
+                }
                 v1.push_back(object_id);
                 if ((int)v1.size() == num_objects) {
                   double_t elapsed = current_time_ms() - start_time;
@@ -214,24 +218,29 @@ class MultinodeObjectManagerTest {
           );
       RAY_CHECK_OK(status);
     } else if (mode == "send"){
-      std::vector<ObjectID> oids;
+      std::unordered_set<ObjectID, UniqueIDHasher> sent_object_ids;
       for (int i=0;i<num_objects;++i) {
         ObjectID oid = WriteDataToClient(client1, object_size);
-        oids.push_back(oid);
+        sent_object_ids.insert(oid);
       }
       status =
           server1->object_manager_.SubscribeObjAdded(
-              [this, remote_client_id, oids, object_size, num_objects](const ObjectID &object_id) {
-                RAY_LOG(INFO) << "received " << object_id;
+              [this, remote_client_id, sent_object_ids, object_size, num_objects](const ObjectID &incoming_object_id) {
+                if (sent_object_ids.count(incoming_object_id) != 0) {
+                  // start when we receive an ObjectID we didn't send.
+                  // this is the small object sent from the receiver.
+                  return;
+                }
+                RAY_LOG(INFO) << "received " << incoming_object_id;
                 int64_t start_time = current_time_ms();
                 // wait for object from receiver before sending.
-                for (auto oid : oids) {
+                for (auto oid : sent_object_ids) {
                   ray::Status async_status = server1->object_manager_.Push(oid, remote_client_id);
                   RAY_CHECK_OK(async_status);
                 }
                 int64_t elapsed = current_time_ms() - start_time;
                 RAY_LOG(INFO) << "elapsed " << elapsed;
-                for (auto oid : oids) {
+                for (auto oid : sent_object_ids) {
                   RAY_LOG(INFO) << "sent " << oid;
                 }
               }
