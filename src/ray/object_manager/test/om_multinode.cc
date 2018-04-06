@@ -185,6 +185,7 @@ class MultinodeObjectManagerTest {
       // send a small object to initiate the send from sending side.
       ObjectID oid = WriteDataToClient(client1, 1);
       status = server1->object_manager_.Push(oid, remote_client_id);
+      RAY_LOG(INFO) << "sent " << remote_client_id;
       // start timer now since the sender will start sending as soon as it receives
       // the small object.
       int64_t start_time = current_time_ms();
@@ -214,6 +215,7 @@ class MultinodeObjectManagerTest {
       status =
           server1->object_manager_.SubscribeObjAdded(
               [this, remote_client_id, oids, object_size, num_objects](const ObjectID &object_id) {
+                RAY_LOG(INFO) << "received " << remote_client_id;
                 int64_t start_time = current_time_ms();
                 // wait for object from receiver before sending.
                 for (auto oid : oids) {
