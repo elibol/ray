@@ -308,7 +308,7 @@ ray::Status ObjectManager::SendObjectHeaders(const ObjectID &object_id_const,
   std::shared_ptr<plasma::PlasmaClient> store_client = store_pool_.GetObjectStore();
   ARROW_CHECK_OK(store_client->Get(&plasma_id, 1, 0, &object_buffer));
   if (object_buffer.data_size == -1) {
-    RAY_LOG(ERROR) << "Failed to get object";
+    RAY_LOG(ERROR) << "Failed to get object " << object_id;
     // If the object wasn't locally available, exit immediately. If the object
     // later appears locally, the requesting plasma manager should request the
     // transfer again.
