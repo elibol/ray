@@ -30,7 +30,8 @@ class MockServer {
         object_manager_socket_(main_service),
         gcs_client_(gcs_client),
         object_manager_(main_service, std::move(object_manager_service),
-                        object_manager_config, gcs_client) {
+                        object_manager_config, gcs_client),
+        main_service_(main_service) {
     RAY_CHECK_OK(RegisterGcs(node_ip_address, redis_address, redis_port, main_service));
     // Start listening for clients.
     DoAcceptObjectManager();
@@ -65,6 +66,7 @@ class MockServer {
   }
 
   void DoAcceptObjectManager() {
+    object_manager_socket_ = boost::asio::ip::tcp::socket(main_service_);
     object_manager_acceptor_.async_accept(
         object_manager_socket_, boost::bind(&MockServer::HandleAcceptObjectManager, this,
                                             boost::asio::placeholders::error));
@@ -92,6 +94,7 @@ class MockServer {
   boost::asio::ip::tcp::socket object_manager_socket_;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_;
   ObjectManager object_manager_;
+  boost::asio::io_service &main_service_;
 };
 
 class MultinodeObjectManagerTest {
