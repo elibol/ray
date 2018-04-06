@@ -169,6 +169,7 @@ class MultinodeObjectManagerTest {
 
   void ConnectAndExecute(std::string mode, int object_size, int num_objects) {
     ClientID client_id_1 = gcs_client_1->client_table().GetLocalClientId();
+    RAY_LOG(INFO) << "local client_id " << client_id_1;
     gcs_client_1->client_table().RegisterClientAddedCallback(
         [this, client_id_1, mode, object_size, num_objects]
             (gcs::AsyncGcsClient *client, const ClientID &id, const ClientTableDataT &data) {
@@ -180,6 +181,7 @@ class MultinodeObjectManagerTest {
   }
 
   void Execute(ClientID remote_client_id, std::string mode, int object_size, int num_objects){
+    RAY_LOG(INFO) << "remote client_id " << remote_client_id;
     ray::Status status = ray::Status::OK();
     if (mode == "receive"){
       // send a small object to initiate the send from sending side.
@@ -220,7 +222,7 @@ class MultinodeObjectManagerTest {
       status =
           server1->object_manager_.SubscribeObjAdded(
               [this, remote_client_id, oids, object_size, num_objects](const ObjectID &object_id) {
-                RAY_LOG(INFO) << "received " << remote_client_id;
+                RAY_LOG(INFO) << "received " << object_id;
                 int64_t start_time = current_time_ms();
                 // wait for object from receiver before sending.
                 for (auto oid : oids) {
