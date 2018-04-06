@@ -231,7 +231,7 @@ class MultinodeObjectManagerTest {
     } else if (mode == "send"){
       status =
           server1->object_manager_.SubscribeObjAdded(
-              [this, remote_client_id, send_object_ids, object_size, num_objects](const ObjectID &incoming_object_id) {
+              [this, remote_client_id, object_size, num_objects](const ObjectID &incoming_object_id) {
                 if (send_object_ids.count(incoming_object_id) != 0) {
                   // start when we receive an ObjectID we didn't send.
                   // this is the small object sent from the receiver.
