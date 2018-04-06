@@ -178,7 +178,7 @@ class MultinodeObjectManagerTest {
         send_object_ids.insert(oid);
       }
     }
-
+    sleep(1);
     ClientID client_id_1 = gcs_client_1->client_table().GetLocalClientId();
     RAY_LOG(INFO) << "local client_id " << client_id_1;
     gcs_client_1->client_table().RegisterClientAddedCallback(
