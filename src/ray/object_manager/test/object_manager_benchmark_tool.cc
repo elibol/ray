@@ -106,19 +106,21 @@ class MultinodeObjectManagerTest {
                              int redis_port,
                              int num_threads,
                              int max_sends,
-                             int max_receives) {
+                             int max_receives,
+                             std::string mode) {
     SetUp(node_ip_address,
           redis_address,
           redis_port,
           num_threads,
           max_sends,
-          max_receives);
+          max_receives,
+          mode);
   }
 
   std::string StartStore(const std::string &id) {
     std::string store_id = "/tmp/store";
     store_id = store_id + id;
-    std::string plasma_command = store_executable + " -m 32000000000 -s " + store_id +
+    std::string plasma_command = store_executable + " -m 16000000000 -s " + store_id +
         " 1> /dev/null 2> /dev/null &";
     RAY_LOG(DEBUG) << plasma_command;
     int ec = system(plasma_command.c_str());
@@ -134,12 +136,13 @@ class MultinodeObjectManagerTest {
              int redis_port,
              int num_threads,
              int max_sends,
-             int max_receives) {
+             int max_receives,
+             std::string mode) {
 
     object_manager_service_1.reset(new boost::asio::io_service());
 
     // start store
-    std::string store_sock_1 = StartStore("1");
+    std::string store_sock_1 = StartStore(mode);
 
     // start first server
     gcs_client_1 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
@@ -181,61 +184,78 @@ class MultinodeObjectManagerTest {
     return object_id;
   }
 
-  void ConnectAndExecute(std::string mode, int object_size, int num_objects) {
+  void ConnectAndExecute(std::string mode, int object_size, int num_objects, int num_trials) {
     if (mode == "send"){
       // Create the objects to send before connecting.
       // The receiver will start timing as soon as the sender connects,
       // so we want to make sure we're not timing object creation.
-      for (int i=0;i<num_objects;++i) {
-        ObjectID oid = WriteDataToClient(client1, object_size);
-        send_object_ids.insert(oid);
+      for (int trial=0; trial < num_trials; ++trial){
+        send_object_ids.emplace_back(std::unordered_set<ObjectID, UniqueIDHasher>());
+        for (int i=0;i<num_objects;++i) {
+          ObjectID oid = WriteDataToClient(client1, object_size);
+          send_object_ids[trial].insert(oid);
+          ignore_send_ids.insert(oid);
+        }
       }
     }
     ClientID client_id_1 = gcs_client_1->client_table().GetLocalClientId();
     RAY_LOG(INFO) << "local client_id " << client_id_1;
     gcs_client_1->client_table().RegisterClientAddedCallback(
-        [this, client_id_1, mode, object_size, num_objects]
+        [this, client_id_1, mode, object_size, num_objects, num_trials]
             (gcs::AsyncGcsClient *client, const ClientID &id, const ClientTableDataT &data) {
           ClientID parsed_id = ClientID::from_binary(data.client_id);
           if (!(parsed_id == client_id_1)){
-            Execute(parsed_id, mode, object_size, num_objects);
+            Execute(parsed_id, mode, object_size, num_objects, num_trials);
           }
     });
   }
 
-  void Execute(ClientID remote_client_id, std::string mode, int object_size, int num_objects){
+  void Execute(ClientID remote_client_id, std::string mode, int object_size, int num_objects, int num_trials){
     RAY_LOG(INFO) << "remote client_id " << remote_client_id;
     ray::Status status = ray::Status::OK();
     if (mode == "receive"){
       // send a small object to initiate the send from sending side.
-      ObjectID init_object = WriteDataToClient(client1, 1);
+      init_object = WriteDataToClient(client1, 1);
       status = server1->object_manager_.Push(init_object, remote_client_id);
       RAY_LOG(INFO) << "sent " << init_object;
       // start timer now since the sender will start sending as soon as it receives
       // the small object.
-      int64_t start_time = current_time_ms();
       status =
           server1->object_manager_.SubscribeObjAdded(
-              [this, init_object, start_time, object_size, num_objects](const ObjectID &object_id) {
+              [this, remote_client_id, object_size,
+                  num_objects, num_trials](const ObjectID &object_id) {
                 if (init_object == object_id){
                   // ignore the initial object we sent out to start the experiment.
+                  // start the timer here since we will certainly register object added
+                  // before the remote object manager does.
+                  start_time = current_time_ms();
                   return;
                 }
+
+                // record stats
                 v1.push_back(object_id);
+                receive_times.push_back(current_time_ms());
+
                 if ((int)v1.size() == num_objects) {
                   double_t elapsed = current_time_ms() - start_time;
                   double_t gbits = (double)object_size*num_objects*8.0/1000.0/1000.0/1000.0;
-                  // double_t throughput = float(object_size*num_objects)*8.0/1000.0/1000.0/1000.0/(elapsed/1000.0);
                   double_t gbits_sec = gbits/(elapsed/1000.0);
                   RAY_LOG(INFO) << "elapsed milliseconds " << elapsed;
                   RAY_LOG(INFO) << "GBits transferred " << gbits;
                   RAY_LOG(INFO) << "GBits/sec " << gbits_sec;
 
-                  for (auto v1oid : v1) {
-                    RAY_LOG(INFO) << "received " << v1oid;
+                  for (uint i=0;i<v1.size();++i) {
+                    RAY_LOG(INFO) << "received " << v1[i] << " " << receive_times[i];
                   }
 
-                  TearDown();
+                  trial_count += 1;
+                  if (trial_count < num_trials) {
+                    v1.clear();
+                    init_object = WriteDataToClient(client1, 1);
+                    Status push_status = server1->object_manager_.Push(init_object, remote_client_id);
+                    RAY_LOG(INFO) << "sent " << init_object;
+                  }
+                  // TearDown();
                 }
               }
           );
@@ -244,22 +264,24 @@ class MultinodeObjectManagerTest {
       status =
           server1->object_manager_.SubscribeObjAdded(
               [this, remote_client_id, object_size, num_objects](const ObjectID &incoming_object_id) {
-                if (send_object_ids.count(incoming_object_id) != 0) {
-                  // start when we receive an ObjectID we didn't send.
+                if (ignore_send_ids.count(incoming_object_id) != 0) {
+                  // send objects only when we receive an ObjectID we didn't send.
                   // this is the small object sent from the receiver.
                   return;
                 }
                 RAY_LOG(INFO) << "received " << incoming_object_id;
-                int64_t start_time = current_time_ms();
-                for (auto oid : send_object_ids) {
+                start_time = current_time_ms();
+                for (auto oid : send_object_ids[trial_count]) {
                   ray::Status async_status = server1->object_manager_.Push(oid, remote_client_id);
                   RAY_CHECK_OK(async_status);
                 }
                 int64_t elapsed = current_time_ms() - start_time;
                 RAY_LOG(INFO) << "elapsed " << elapsed;
-                for (auto oid : send_object_ids) {
+
+                for (auto oid : send_object_ids[trial_count]) {
                   RAY_LOG(INFO) << "sent " << oid;
                 }
+                trial_count += 1;
               }
           );
       RAY_CHECK_OK(status);
@@ -271,7 +293,8 @@ class MultinodeObjectManagerTest {
   boost::asio::io_service main_service;
 
  protected:
-  std::unordered_set<ObjectID, UniqueIDHasher> send_object_ids;
+  std::vector<std::unordered_set<ObjectID, UniqueIDHasher>> send_object_ids;
+  std::unordered_set<ObjectID, UniqueIDHasher> ignore_send_ids;
 
   std::thread p;
   std::unique_ptr<boost::asio::io_service> object_manager_service_1;
@@ -280,6 +303,12 @@ class MultinodeObjectManagerTest {
 
   plasma::PlasmaClient client1;
   std::vector<ObjectID> v1;
+  std::vector<int64_t> receive_times;
+
+  // experiment-specific variables
+  int trial_count = 0;
+  int64_t start_time;
+  ObjectID init_object;
 };
 
 
@@ -291,29 +320,40 @@ int main(int argc, char **argv) {
   int redis_port = std::stoi(argv[3]);
   ray::store_executable = std::string(argv[4]);
   const std::string mode = std::string(argv[5]);
+
   int object_size = std::stoi(argv[6]);
   int num_objects = std::stoi(argv[7]);
+  int num_trials = std::stoi(argv[8]);
 
-  int num_threads = std::stoi(argv[8]);
-  int max_sends = std::stoi(argv[9]);
-  int max_receives = std::stoi(argv[10]);
+  int num_threads = std::stoi(argv[9]);
+  int max_sends = std::stoi(argv[10]);
+  int max_receives = std::stoi(argv[11]);
 
   RAY_LOG(INFO) <<"\n"
       << "node_ip_address=" << node_ip_address << "\n"
       << "redis_address=" << redis_address << "\n"
       << "redis_port=" << redis_port << "\n"
       << "store_executable=" << store_executable << "\n"
+
+      << "\n"
       << "mode=" << mode << "\n"
       << "object_size=" << object_size << "\n"
-      << "num_objects=" << num_objects << "\n";
+      << "num_objects=" << num_objects << "\n"
+      << "num_trials=" << num_trials << "\n"
+
+      << "\n"
+      << "num_threads=" << num_threads << "\n"
+      << "max_sends=" << max_sends << "\n"
+      << "max_receives=" << max_receives << "\n";
 
   MultinodeObjectManagerTest om(node_ip_address,
                                 redis_address,
                                 redis_port,
                                 num_threads,
                                 max_sends,
-                                max_receives);
+                                max_receives,
+                                mode);
 
-  om.ConnectAndExecute(mode, object_size, num_objects);
+  om.ConnectAndExecute(mode, object_size, num_objects, num_trials);
   om.main_service.run();
 }
