@@ -237,20 +237,26 @@ class MultinodeObjectManagerTest {
                 receive_times.push_back(current_time_ms());
 
                 if ((int)v1.size() == num_objects) {
-                  double_t elapsed = current_time_ms() - start_time;
-                  double_t gbits = (double)object_size*num_objects*8.0/1000.0/1000.0/1000.0;
-                  double_t gbits_sec = gbits/(elapsed/1000.0);
-                  RAY_LOG(INFO) << "elapsed milliseconds " << elapsed;
-                  RAY_LOG(INFO) << "GBits transferred " << gbits;
-                  RAY_LOG(INFO) << "GBits/sec " << gbits_sec;
-
                   for (uint i=0;i<v1.size();++i) {
                     RAY_LOG(INFO) << "received " << v1[i] << " " << receive_times[i];
                   }
+                  double_t elapsed = current_time_ms() - start_time;
+                  double_t gbits = (double)object_size*num_objects*8.0/1000.0/1000.0/1000.0;
+                  double_t gbits_sec = gbits/(elapsed/1000.0);
+                  int64_t min_time = *std::min_element(receive_times.begin(), receive_times.end());
+                  int64_t max_time = *std::max_element(receive_times.begin(), receive_times.end());
+
+                  RAY_LOG(INFO) << "elapsed milliseconds " << elapsed;
+                  RAY_LOG(INFO) << "GBits transferred " << gbits;
+                  RAY_LOG(INFO) << "GBits/sec " << gbits_sec;
+                  RAY_LOG(INFO) << "max=" << max_time << " min=" << min_time;
+                  RAY_LOG(INFO) << "max-min time " << (max_time-min_time);
 
                   trial_count += 1;
                   if (trial_count < num_trials) {
+                    // clear stats
                     v1.clear();
+                    receive_times.clear();
                     init_object = WriteDataToClient(client1, 1);
                     Status push_status = server1->object_manager_.Push(init_object, remote_client_id);
                     RAY_LOG(INFO) << "sent " << init_object;
