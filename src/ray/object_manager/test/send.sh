@@ -13,7 +13,7 @@ mode="send"
 # object_size*num_objects*num_trials memory to run the experiment.
 object_size=100000000
 num_objects=2
-num_trials=3
+num_trials=10
 
 num_threads=4
 max_sends=4

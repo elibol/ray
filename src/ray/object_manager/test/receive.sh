@@ -11,7 +11,7 @@ om_exec="$CORE_DIR/src/ray/object_manager/object_manager_benchmark_tool"
 mode="receive"
 object_size=100000000
 num_objects=2
-num_trials=3
+num_trials=10
 
 num_threads=4
 max_sends=4

@@ -2,6 +2,7 @@
 #include <iostream>
 #include <random>
 #include <thread>
+#include <numeric>
 
 #include "ray/object_manager/object_manager.h"
 
@@ -246,6 +247,10 @@ class MultinodeObjectManagerTest {
                   int64_t min_time = *std::min_element(receive_times.begin(), receive_times.end());
                   int64_t max_time = *std::max_element(receive_times.begin(), receive_times.end());
 
+                  elapsed_stats_.push_back(elapsed);
+                  gbits_sec_stats_.push_back(gbits_sec);
+                  duration_stats_.push_back((double)max_time-(double)min_time);
+
                   RAY_LOG(INFO) << "elapsed milliseconds " << elapsed;
                   RAY_LOG(INFO) << "GBits transferred " << gbits;
                   RAY_LOG(INFO) << "GBits/sec " << gbits_sec;
@@ -260,6 +265,20 @@ class MultinodeObjectManagerTest {
                     init_object = WriteDataToClient(client1, 1);
                     Status push_status = server1->object_manager_.Push(init_object, remote_client_id);
                     RAY_LOG(INFO) << "sent " << init_object;
+                  } else {
+                    std::pair<double_t,double_t> elapsed_stat = mean_std(elapsed_stats_, 3);
+                    std::pair<double_t,double_t> gbits_sec_stat = mean_std(gbits_sec_stats_, 3);
+                    std::pair<double_t,double_t> duration_stat = mean_std(duration_stats_, 3);
+
+                    RAY_LOG(INFO) << "elapsed milliseconds "
+                                  << "mean=" << elapsed_stat.first
+                                  << " std=" << elapsed_stat.second;
+                    RAY_LOG(INFO) << "GBits/sec "
+                                  << "mean=" << gbits_sec_stat.first
+                                  << " std=" << gbits_sec_stat.second;
+                    RAY_LOG(INFO) << "max-min time "
+                                  << "mean=" << duration_stat.first
+                                  << " std=" << duration_stat.second;
                   }
                   // TearDown();
                 }
@@ -296,6 +315,19 @@ class MultinodeObjectManagerTest {
     }
   }
 
+  std::pair<double_t,double_t> mean_std(const std::vector<double_t> &in_v, uint skip_n){
+    std::vector<double_t> v;
+    for (;skip_n<in_v.size();++skip_n) {
+      v.push_back(in_v[skip_n]);
+    }
+    RAY_LOG(INFO) << "mean_std with n=" << v.size();
+    double sum = std::accumulate(v.begin(), v.end(), 0.0);
+    double mean = sum / v.size();
+    double sq_sum = std::inner_product(v.begin(), v.end(), v.begin(), 0.0);
+    double stdev = std::sqrt(sq_sum / v.size() - mean * mean);
+    return std::pair<double_t,double_t>(mean, stdev);
+  }
+
   boost::asio::io_service main_service;
 
  protected:
@@ -315,6 +347,11 @@ class MultinodeObjectManagerTest {
   int trial_count = 0;
   int64_t start_time;
   ObjectID init_object;
+
+  // stats
+  std::vector<double_t> elapsed_stats_;
+  std::vector<double_t> gbits_sec_stats_;
+  std::vector<double_t> duration_stats_;
 };
 
 
