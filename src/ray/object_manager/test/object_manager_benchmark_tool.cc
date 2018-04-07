@@ -108,20 +108,22 @@ class MultinodeObjectManagerTest {
                              int num_threads,
                              int max_sends,
                              int max_receives,
-                             std::string mode) {
+                             std::string mode,
+                             uint64_t object_chunk_size) {
     SetUp(node_ip_address,
           redis_address,
           redis_port,
           num_threads,
           max_sends,
           max_receives,
-          mode);
+          mode,
+          object_chunk_size);
   }
 
   std::string StartStore(const std::string &id) {
     std::string store_id = "/tmp/store";
     store_id = store_id + id;
-    std::string plasma_command = store_executable + " -m 16000000000 -s " + store_id +
+    std::string plasma_command = store_executable + " -m 8000000000 -s " + store_id +
         " 1> /dev/null 2> /dev/null &";
     RAY_LOG(DEBUG) << plasma_command;
     int ec = system(plasma_command.c_str());
@@ -138,7 +140,8 @@ class MultinodeObjectManagerTest {
              int num_threads,
              int max_sends,
              int max_receives,
-             std::string mode) {
+             std::string mode,
+             uint64_t object_chunk_size) {
 
     object_manager_service_1.reset(new boost::asio::io_service());
 
@@ -153,6 +156,7 @@ class MultinodeObjectManagerTest {
     om_config_1.num_threads = num_threads;
     om_config_1.max_sends = max_sends;
     om_config_1.max_receives = max_receives;
+    om_config_1.object_chunk_size = object_chunk_size;
     server1.reset(new MockServer(main_service,
                                  node_ip_address,
                                  redis_address,
@@ -185,7 +189,7 @@ class MultinodeObjectManagerTest {
     return object_id;
   }
 
-  void ConnectAndExecute(std::string mode, int object_size, int num_objects, int num_trials) {
+  void ConnectAndExecute(std::string mode, uint64_t object_size, int num_objects, int num_trials) {
     if (mode == "send"){
       // Create the objects to send before connecting.
       // The receiver will start timing as soon as the sender connects,
@@ -211,7 +215,7 @@ class MultinodeObjectManagerTest {
     });
   }
 
-  void Execute(ClientID remote_client_id, std::string mode, int object_size, int num_objects, int num_trials){
+  void Execute(ClientID remote_client_id, std::string mode, uint64_t object_size, int num_objects, int num_trials){
     RAY_LOG(INFO) << "remote client_id " << remote_client_id;
     ray::Status status = ray::Status::OK();
     if (mode == "receive"){
@@ -224,8 +228,8 @@ class MultinodeObjectManagerTest {
       status =
           server1->object_manager_.SubscribeObjAdded(
               [this, remote_client_id, object_size,
-                  num_objects, num_trials](const ObjectID &object_id) {
-                if (init_object == object_id){
+                  num_objects, num_trials](const RayObjectInfo &object_info) {
+                if (init_object == object_info.object_id){
                   // ignore the initial object we sent out to start the experiment.
                   // start the timer here since we will certainly register object added
                   // before the remote object manager does.
@@ -234,12 +238,12 @@ class MultinodeObjectManagerTest {
                 }
 
                 // record stats
-                v1.push_back(object_id);
+                v1.push_back(object_info.object_id);
                 receive_times.push_back(current_time_ms());
 
                 if ((int)v1.size() == num_objects) {
                   for (uint i=0;i<v1.size();++i) {
-                    RAY_LOG(INFO) << "received " << v1[i] << " " << receive_times[i];
+                    RAY_LOG(DEBUG) << "received " << v1[i] << " " << receive_times[i];
                   }
                   double_t elapsed = current_time_ms() - start_time;
                   double_t gbits = (double)object_size*num_objects*8.0/1000.0/1000.0/1000.0;
@@ -251,11 +255,11 @@ class MultinodeObjectManagerTest {
                   gbits_sec_stats_.push_back(gbits_sec);
                   duration_stats_.push_back((double)max_time-(double)min_time);
 
-                  RAY_LOG(INFO) << "elapsed milliseconds " << elapsed;
-                  RAY_LOG(INFO) << "GBits transferred " << gbits;
-                  RAY_LOG(INFO) << "GBits/sec " << gbits_sec;
-                  RAY_LOG(INFO) << "max=" << max_time << " min=" << min_time;
-                  RAY_LOG(INFO) << "max-min time " << (max_time-min_time);
+                  RAY_LOG(DEBUG) << "elapsed milliseconds " << elapsed;
+                  RAY_LOG(DEBUG) << "GBits transferred " << gbits;
+                  RAY_LOG(DEBUG) << "GBits/sec " << gbits_sec;
+                  RAY_LOG(DEBUG) << "max=" << max_time << " min=" << min_time;
+                  RAY_LOG(DEBUG) << "max-min time " << (max_time-min_time);
 
                   trial_count += 1;
                   if (trial_count < num_trials) {
@@ -264,7 +268,7 @@ class MultinodeObjectManagerTest {
                     receive_times.clear();
                     init_object = WriteDataToClient(client1, 1);
                     Status push_status = server1->object_manager_.Push(init_object, remote_client_id);
-                    RAY_LOG(INFO) << "sent " << init_object;
+                    RAY_LOG(INFO) << "trial " << trial_count << " " << init_object;
                   } else {
                     std::pair<double_t,double_t> elapsed_stat = mean_std(elapsed_stats_, 3);
                     std::pair<double_t,double_t> gbits_sec_stat = mean_std(gbits_sec_stats_, 3);
@@ -288,23 +292,25 @@ class MultinodeObjectManagerTest {
     } else if (mode == "send"){
       status =
           server1->object_manager_.SubscribeObjAdded(
-              [this, remote_client_id, object_size, num_objects](const ObjectID &incoming_object_id) {
-                if (ignore_send_ids.count(incoming_object_id) != 0) {
+              [this, remote_client_id, object_size, num_objects](const RayObjectInfo &object_info) {
+                if (ignore_send_ids.count(object_info.object_id) != 0) {
                   // send objects only when we receive an ObjectID we didn't send.
                   // this is the small object sent from the receiver.
                   return;
                 }
-                RAY_LOG(INFO) << "received " << incoming_object_id;
+                RAY_LOG(DEBUG) << "received " << object_info.object_id;
                 start_time = current_time_ms();
                 for (auto oid : send_object_ids[trial_count]) {
                   ray::Status async_status = server1->object_manager_.Push(oid, remote_client_id);
                   RAY_CHECK_OK(async_status);
                 }
                 int64_t elapsed = current_time_ms() - start_time;
-                RAY_LOG(INFO) << "elapsed " << elapsed;
+                RAY_LOG(INFO) << "trial=" << trial_count
+                              << " elapsed=" << elapsed
+                              << " object_id=" << object_info.object_id;
 
                 for (auto oid : send_object_ids[trial_count]) {
-                  RAY_LOG(INFO) << "sent " << oid;
+                  RAY_LOG(DEBUG) << "sent " << oid;
                 }
                 trial_count += 1;
               }
@@ -320,7 +326,7 @@ class MultinodeObjectManagerTest {
     for (;skip_n<in_v.size();++skip_n) {
       v.push_back(in_v[skip_n]);
     }
-    RAY_LOG(INFO) << "mean_std with n=" << v.size();
+    RAY_LOG(DEBUG) << "mean_std with n=" << v.size();
     double sum = std::accumulate(v.begin(), v.end(), 0.0);
     double mean = sum / v.size();
     double sq_sum = std::inner_product(v.begin(), v.end(), v.begin(), 0.0);
@@ -364,13 +370,14 @@ int main(int argc, char **argv) {
   ray::store_executable = std::string(argv[4]);
   const std::string mode = std::string(argv[5]);
 
-  int object_size = std::stoi(argv[6]);
+  uint64_t object_size = std::stol(argv[6]);
   int num_objects = std::stoi(argv[7]);
   int num_trials = std::stoi(argv[8]);
 
   int num_threads = std::stoi(argv[9]);
   int max_sends = std::stoi(argv[10]);
   int max_receives = std::stoi(argv[11]);
+  uint64_t object_chunk_size = std::stol(argv[12]);
 
   RAY_LOG(INFO) <<"\n"
       << "node_ip_address=" << node_ip_address << "\n"
@@ -387,7 +394,8 @@ int main(int argc, char **argv) {
       << "\n"
       << "num_threads=" << num_threads << "\n"
       << "max_sends=" << max_sends << "\n"
-      << "max_receives=" << max_receives << "\n";
+      << "max_receives=" << max_receives << "\n"
+      << "object_chunk_size=" << object_chunk_size << "\n";
 
   MultinodeObjectManagerTest om(node_ip_address,
                                 redis_address,
@@ -395,7 +403,8 @@ int main(int argc, char **argv) {
                                 num_threads,
                                 max_sends,
                                 max_receives,
-                                mode);
+                                mode,
+                                object_chunk_size);
 
   om.ConnectAndExecute(mode, object_size, num_objects, num_trials);
   om.main_service.run();

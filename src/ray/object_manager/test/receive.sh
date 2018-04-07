@@ -10,13 +10,14 @@ om_exec="$CORE_DIR/src/ray/object_manager/object_manager_benchmark_tool"
 
 mode="receive"
 object_size=100000000
-num_objects=2
+num_objects=1
 num_trials=10
 
 num_threads=4
 max_sends=4
 max_receives=4
+object_chunk_size=10000000
 
-# echo "$node_ip_address $redis_address $redis_port $store_executable $mode $object_size $num_objects $num_trials $num_threads $max_sends $max_receives"
+# echo "$node_ip_address $redis_address $redis_port $store_executable $mode $object_size $num_objects $num_trials $num_threads $max_sends $max_receives $object_chunk_size"
 # gdb $om_exec
-$om_exec $node_ip_address $redis_address $redis_port $store_executable $mode $object_size $num_objects $num_trials $num_threads $max_sends $max_receives
+$om_exec $node_ip_address $redis_address $redis_port $store_executable $mode $object_size $num_objects $num_trials $num_threads $max_sends $max_receives $object_chunk_size
