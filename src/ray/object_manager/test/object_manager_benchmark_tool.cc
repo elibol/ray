@@ -28,17 +28,19 @@ class MockServer {
              std::shared_ptr<gcs::AsyncGcsClient> gcs_client)
       : object_manager_acceptor_(
       main_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
-        object_manager_socket_(main_service),
         gcs_client_(gcs_client),
+        main_service_(main_service),
+        object_manager_service_(object_manager_service.get()),
+        object_manager_socket_(main_service),
         object_manager_(main_service, std::move(object_manager_service),
-                        object_manager_config, gcs_client),
-        main_service_(main_service) {
+                        object_manager_config, gcs_client) {
     RAY_CHECK_OK(RegisterGcs(node_ip_address, redis_address, redis_port, main_service));
     // Start listening for clients.
     DoAcceptObjectManager();
   }
 
   ~MockServer() {
+    object_manager_acceptor_.cancel();
     RAY_CHECK_OK(gcs_client_->client_table().Disconnect());
     RAY_CHECK_OK(object_manager_.Terminate());
   }
@@ -67,7 +69,7 @@ class MockServer {
   }
 
   void DoAcceptObjectManager() {
-    object_manager_socket_ = boost::asio::ip::tcp::socket(main_service_);
+    object_manager_socket_ = boost::asio::ip::tcp::socket(*object_manager_service_);
     object_manager_acceptor_.async_accept(
         object_manager_socket_, boost::bind(&MockServer::HandleAcceptObjectManager, this,
                                             boost::asio::placeholders::error));
@@ -92,10 +94,11 @@ class MockServer {
   friend class MultinodeObjectManagerTest;
 
   boost::asio::ip::tcp::acceptor object_manager_acceptor_;
-  boost::asio::ip::tcp::socket object_manager_socket_;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_;
-  ObjectManager object_manager_;
   boost::asio::io_service &main_service_;
+  boost::asio::io_service *object_manager_service_;
+  boost::asio::ip::tcp::socket object_manager_socket_;
+  ObjectManager object_manager_;
 };
 
 class MultinodeObjectManagerTest {
@@ -166,6 +169,7 @@ class MultinodeObjectManagerTest {
   }
 
   void TearDown() {
+    main_service.stop();
     arrow::Status client1_status = client1.Disconnect();
     RAY_CHECK(client1_status.ok());
     this->server1.reset();
@@ -280,7 +284,7 @@ class MultinodeObjectManagerTest {
                                   << "mean=" << duration_stat.first
                                   << " std=" << duration_stat.second;
                   }
-                  // TearDown();
+                  TearDown();
                 }
               }
           );
@@ -288,7 +292,7 @@ class MultinodeObjectManagerTest {
     } else if (mode == "send"){
       status =
           server1->object_manager_.SubscribeObjAdded(
-              [this, remote_client_id, object_size, num_objects](const ObjectID &incoming_object_id) {
+              [this, remote_client_id, object_size, num_objects, num_trials](const ObjectID &incoming_object_id) {
                 if (ignore_send_ids.count(incoming_object_id) != 0) {
                   // send objects only when we receive an ObjectID we didn't send.
                   // this is the small object sent from the receiver.
@@ -307,6 +311,9 @@ class MultinodeObjectManagerTest {
                   RAY_LOG(INFO) << "sent " << oid;
                 }
                 trial_count += 1;
+                if (trial_count >= num_trials){
+                  // TearDown();
+                }
               }
           );
       RAY_CHECK_OK(status);

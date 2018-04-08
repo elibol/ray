@@ -1,3 +1,5 @@
+set(CMAKE_CXX_FLAGS "-g -ggdb -Wall -Werror -std=c++11")
+
 include(${CMAKE_CURRENT_LIST_DIR}/../../common/cmake/Common.cmake)
 
 set(OBJECT_MANAGER_FBS_SRC "${CMAKE_CURRENT_LIST_DIR}/format/object_manager.fbs")
@@ -22,6 +24,8 @@ add_custom_target(gen_object_manager_fbs DEPENDS ${OBJECT_MANAGER_FBS_OUTPUT_FIL
 ADD_RAY_TEST(test/object_manager_test STATIC_LINK_LIBS ray_static ${PLASMA_STATIC_LIB} ${ARROW_STATIC_LIB} gtest gtest_main pthread ${Boost_SYSTEM_LIBRARY})
 ADD_RAY_TEST(test/object_manager_stress_test STATIC_LINK_LIBS ray_static ${PLASMA_STATIC_LIB} ${ARROW_STATIC_LIB} gtest gtest_main pthread ${Boost_SYSTEM_LIBRARY})
 ADD_RAY_TEST(test/object_manager_benchmark_tool STATIC_LINK_LIBS ray_static ${PLASMA_STATIC_LIB} ${ARROW_STATIC_LIB} gtest gtest_main pthread ${Boost_SYSTEM_LIBRARY})
+
+RAY_TEST_LINK_LIBRARIES(test/object_manager_benchmark_tool -lprofiler)
 
 add_library(object_manager object_manager.cc object_manager.h ${OBJECT_MANAGER_FBS_OUTPUT_FILES})
 target_link_libraries(object_manager common ray_static ${PLASMA_STATIC_LIB} ${ARROW_STATIC_LIB} ${Boost_SYSTEM_LIBRARY})
