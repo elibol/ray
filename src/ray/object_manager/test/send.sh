@@ -16,8 +16,8 @@ if [ ! -d $PROFILE_DIR ]; then
 fi
 
 mode="send"
-object_size=100000000
-num_objects=2
+object_size=10000000
+num_objects=4
 num_trials=10
 
 num_threads=4
@@ -29,5 +29,5 @@ max_receives=4
 
 # echo "$node_ip_address $redis_address $redis_port $store_executable $mode $object_size $num_objects $num_trials $num_threads $max_sends $max_receives"
 # gdb $OM_EXEC
-$OM_EXEC $node_ip_address $redis_address $redis_port $store_executable $mode $object_size $num_objects $num_trials $num_threads $max_sends $max_receives
-# LD_PRELOAD=/usr/lib/libprofiler.so CPUPROFILE=$PROFILE_OUT $OM_EXEC $node_ip_address $redis_address $redis_port $store_executable $mode $object_size $num_objects $num_trials $num_threads $max_sends $max_receives
+# $OM_EXEC $node_ip_address $redis_address $redis_port $store_executable $mode $object_size $num_objects $num_trials $num_threads $max_sends $max_receives
+LD_PRELOAD=/usr/lib/libprofiler.so CPUPROFILE=$PROFILE_OUT $OM_EXEC $node_ip_address $redis_address $redis_port $store_executable $mode $object_size $num_objects $num_trials $num_threads $max_sends $max_receives

@@ -173,8 +173,8 @@ class MultinodeObjectManagerTest {
     arrow::Status client1_status = client1.Disconnect();
     RAY_CHECK(client1_status.ok());
     this->server1.reset();
-    int s = system("killall plasma_store &");
-    RAY_CHECK(!s);
+    // int s = system("killall plasma_store &");
+    // RAY_CHECK(!s);
   }
 
   ObjectID WriteDataToClient(plasma::PlasmaClient &client, int64_t data_size) {
@@ -243,7 +243,7 @@ class MultinodeObjectManagerTest {
 
                 if ((int)v1.size() == num_objects) {
                   for (uint i=0;i<v1.size();++i) {
-                    RAY_LOG(INFO) << "received " << v1[i] << " " << receive_times[i];
+                    RAY_LOG(DEBUG) << "received " << v1[i] << " " << receive_times[i];
                   }
                   double_t elapsed = current_time_ms() - start_time;
                   double_t gbits = (double)object_size*num_objects*8.0/1000.0/1000.0/1000.0;
@@ -255,11 +255,11 @@ class MultinodeObjectManagerTest {
                   gbits_sec_stats_.push_back(gbits_sec);
                   duration_stats_.push_back((double)max_time-(double)min_time);
 
-                  RAY_LOG(INFO) << "elapsed milliseconds " << elapsed;
-                  RAY_LOG(INFO) << "GBits transferred " << gbits;
-                  RAY_LOG(INFO) << "GBits/sec " << gbits_sec;
-                  RAY_LOG(INFO) << "max=" << max_time << " min=" << min_time;
-                  RAY_LOG(INFO) << "max-min time " << (max_time-min_time);
+                  RAY_LOG(DEBUG) << "elapsed milliseconds " << elapsed;
+                  RAY_LOG(DEBUG) << "GBits transferred " << gbits;
+                  RAY_LOG(DEBUG) << "GBits/sec " << gbits_sec;
+                  RAY_LOG(DEBUG) << "max=" << max_time << " min=" << min_time;
+                  RAY_LOG(DEBUG) << "max-min time " << (max_time-min_time);
 
                   trial_count += 1;
                   if (trial_count < num_trials) {
@@ -283,8 +283,8 @@ class MultinodeObjectManagerTest {
                     RAY_LOG(INFO) << "max-min time "
                                   << "mean=" << duration_stat.first
                                   << " std=" << duration_stat.second;
+                    TearDown();
                   }
-                  TearDown();
                 }
               }
           );
@@ -308,11 +308,11 @@ class MultinodeObjectManagerTest {
                 RAY_LOG(INFO) << "elapsed " << elapsed;
 
                 for (auto oid : send_object_ids[trial_count]) {
-                  RAY_LOG(INFO) << "sent " << oid;
+                  RAY_LOG(DEBUG) << "sent " << oid;
                 }
                 trial_count += 1;
                 if (trial_count >= num_trials){
-                  // TearDown();
+                  TearDown();
                 }
               }
           );
@@ -327,7 +327,7 @@ class MultinodeObjectManagerTest {
     for (;skip_n<in_v.size();++skip_n) {
       v.push_back(in_v[skip_n]);
     }
-    RAY_LOG(INFO) << "mean_std with n=" << v.size();
+    RAY_LOG(DEBUG) << "mean_std with n=" << v.size();
     double sum = std::accumulate(v.begin(), v.end(), 0.0);
     double mean = sum / v.size();
     double sq_sum = std::inner_product(v.begin(), v.end(), v.begin(), 0.0);

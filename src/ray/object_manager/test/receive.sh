@@ -16,8 +16,8 @@ if [ ! -d $PROFILE_DIR ]; then
 fi
 
 mode="receive"
-object_size=100000000
-num_objects=2
+object_size=10000000
+num_objects=4
 num_trials=10
 
 num_threads=4
