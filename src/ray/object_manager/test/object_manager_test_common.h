@@ -66,6 +66,7 @@ std::string StartStore(const std::string &id, const std::string &store_executabl
   if (ec != 0) {
     throw std::runtime_error("failed to start plasma store.");
   };
+  sleep(1);
   return store_id;
 }
 
