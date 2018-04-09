@@ -16,11 +16,11 @@ ObjectManager::ObjectManager(asio::io_service &main_service,
       store_notification_(main_service, config.store_socket_name),
       buffer_pool_(config.store_socket_name, config.object_chunk_size),
       object_manager_service_(std::move(object_manager_service)),
-      work_(*object_manager_service_),
       connection_pool_(),
       transfer_queue_(),
       num_transfers_send_(0),
       num_transfers_receive_(0) {
+  work_.reset(new boost::asio::io_service::work(*object_manager_service_));
   main_service_ = &main_service;
   config_ = config;
   store_notification_.SubscribeObjAdded([this](const RayObjectInfo &object_info) {
@@ -39,11 +39,11 @@ ObjectManager::ObjectManager(asio::io_service &main_service,
       store_notification_(main_service, config.store_socket_name),
       buffer_pool_(config.store_socket_name, config.object_chunk_size),
       object_manager_service_(std::move(object_manager_service)),
-      work_(*object_manager_service_),
       connection_pool_(),
       transfer_queue_(),
       num_transfers_send_(0),
       num_transfers_receive_(0) {
+  work_.reset(new boost::asio::io_service::work(*object_manager_service_));
   // TODO(hme) Client ID is never set with this constructor.
   main_service_ = &main_service;
   config_ = config;
@@ -82,13 +82,14 @@ void ObjectManager::NotifyDirectoryObjectDeleted(const ObjectID &object_id) {
 }
 
 ray::Status ObjectManager::Terminate() {
-  // TODO(hme): Disconnect all remote connections.
+  // TODO(hme): Update to allow work to be completed before exiting.
+  work_.reset();
   StopIOService();
-  ray::Status status_code = object_directory_->Terminate();
-  // TODO: evaluate store client termination status.
+  connection_pool_.Terminate();
+  RAY_CHECK_OK(object_directory_->Terminate());
   store_notification_.Terminate();
   buffer_pool_.Terminate();
-  return status_code;
+  return ray::Status::OK();
 }
 
 ray::Status ObjectManager::SubscribeObjAdded(
@@ -219,6 +220,7 @@ ray::Status ObjectManager::Push(const ObjectID &object_id, const ClientID &clien
               static_cast<uint64_t>(object_info.object_size + object_info.metadata_size);
           uint64_t metadata_size = static_cast<uint64_t>(object_info.metadata_size);
           uint64_t num_chunks = buffer_pool_.GetNumChunks(data_size);
+          // RAY_LOG(INFO) << "queuing " << object_id << " num_chunks=" << num_chunks;
           for (uint64_t chunk_index = 0; chunk_index < num_chunks; ++chunk_index) {
             transfer_queue_.QueueSend(client_id, object_id, data_size, metadata_size,
                                       chunk_index, info);

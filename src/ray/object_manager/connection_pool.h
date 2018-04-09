@@ -90,6 +90,36 @@ class ConnectionPool {
     throw std::runtime_error("Can't copy ConnectionPool.");
   }
 
+  ray::Status Terminate() {
+    std::vector<SenderMapType> sender_maps = {
+        message_send_connections_,
+        transfer_send_connections_,
+    };
+    std::vector<ReceiverMapType> receiver_maps = {
+        message_receive_connections_,
+        transfer_receive_connections_,
+    };
+    for (auto sender_connections: sender_maps){
+      for (auto pair : sender_connections) {
+        CloseConnections<SenderConnection>(pair.second);
+      }
+    }
+    for (auto receiver_connections: receiver_maps){
+      for (auto pair : receiver_connections) {
+        CloseConnections<TcpClientConnection>(pair.second);
+      }
+    }
+    return ray::Status::OK();
+  }
+
+  template <typename T>
+  ray::Status CloseConnections(std::vector<std::shared_ptr<T>> connections){
+    for (std::shared_ptr<T> conn : connections) {
+      RAY_CHECK_OK(conn->Close());
+    }
+    return ray::Status::OK();
+  }
+
  private:
   /// A container type that maps ClientID to a connection type.
   using SenderMapType =

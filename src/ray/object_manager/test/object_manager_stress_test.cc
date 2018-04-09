@@ -6,118 +6,27 @@
 #include "gtest/gtest.h"
 
 #include "ray/object_manager/object_manager.h"
+#include "ray/object_manager/test/object_manager_test_common.h"
 
 namespace ray {
+namespace object_manager {
+namespace test {
 
 std::string store_executable;
 
-static inline void flushall_redis(void) {
-  redisContext *context = redisConnect("127.0.0.1", 6379);
-  freeReplyObject(redisCommand(context, "FLUSHALL"));
-  redisFree(context);
-}
-
-int64_t current_time_ms() {
-  std::chrono::milliseconds ms_since_epoch =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch());
-  return ms_since_epoch.count();
-}
-
-class MockServer {
+class StressTestObjectManagerBase : public ::testing::Test {
  public:
-  MockServer(boost::asio::io_service &main_service,
-             std::unique_ptr<boost::asio::io_service> object_manager_service,
-             const ObjectManagerConfig &object_manager_config,
-             std::shared_ptr<gcs::AsyncGcsClient> gcs_client)
-      : object_manager_acceptor_(
-            main_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
-        object_manager_socket_(main_service),
-        gcs_client_(gcs_client),
-        object_manager_(main_service, std::move(object_manager_service),
-                        object_manager_config, gcs_client) {
-    RAY_CHECK_OK(RegisterGcs(main_service));
-    // Start listening for clients.
-    DoAcceptObjectManager();
-  }
-
-  ~MockServer() {
-    RAY_CHECK_OK(gcs_client_->client_table().Disconnect());
-    RAY_CHECK_OK(object_manager_.Terminate());
-  }
-
- private:
-  ray::Status RegisterGcs(boost::asio::io_service &io_service) {
-    RAY_RETURN_NOT_OK(gcs_client_->Connect("127.0.0.1", 6379));
-    RAY_RETURN_NOT_OK(gcs_client_->Attach(io_service));
-
-    boost::asio::ip::tcp::endpoint endpoint = object_manager_acceptor_.local_endpoint();
-    std::string ip = endpoint.address().to_string();
-    unsigned short object_manager_port = endpoint.port();
-
-    ClientTableDataT client_info = gcs_client_->client_table().GetLocalClient();
-    client_info.node_manager_address = ip;
-    client_info.node_manager_port = object_manager_port;
-    client_info.object_manager_port = object_manager_port;
-    return gcs_client_->client_table().Connect(client_info);
-  }
-
-  void DoAcceptObjectManager() {
-    object_manager_acceptor_.async_accept(
-        object_manager_socket_, boost::bind(&MockServer::HandleAcceptObjectManager, this,
-                                            boost::asio::placeholders::error));
-  }
-
-  void HandleAcceptObjectManager(const boost::system::error_code &error) {
-    ClientHandler<boost::asio::ip::tcp> client_handler =
-        [this](std::shared_ptr<TcpClientConnection> client) {
-          object_manager_.ProcessNewClient(client);
-        };
-    MessageHandler<boost::asio::ip::tcp> message_handler = [this](
-        std::shared_ptr<TcpClientConnection> client, int64_t message_type,
-        const uint8_t *message) {
-      object_manager_.ProcessClientMessage(client, message_type, message);
-    };
-    // Accept a new local client and dispatch it to the node manager.
-    auto new_connection = TcpClientConnection::Create(client_handler, message_handler,
-                                                      std::move(object_manager_socket_));
-    DoAcceptObjectManager();
-  }
-
-  friend class StressTestObjectManager;
-
-  boost::asio::ip::tcp::acceptor object_manager_acceptor_;
-  boost::asio::ip::tcp::socket object_manager_socket_;
-  std::shared_ptr<gcs::AsyncGcsClient> gcs_client_;
-  ObjectManager object_manager_;
-};
-
-class TestObjectManagerBase : public ::testing::Test {
- public:
-  TestObjectManagerBase() {}
-
-  std::string StartStore(const std::string &id) {
-    std::string store_id = "/tmp/store";
-    store_id = store_id + id;
-    std::string plasma_command = store_executable + " -m 4000000000 -s " + store_id +
-                                 " 1> /dev/null 2> /dev/null &";
-    RAY_LOG(DEBUG) << plasma_command;
-    int ec = system(plasma_command.c_str());
-    if (ec != 0) {
-      throw std::runtime_error("failed to start plasma store.");
-    };
-    return store_id;
-  }
+  StressTestObjectManagerBase() {}
 
   void SetUp() {
-    flushall_redis();
+    test::flushall_redis();
 
     object_manager_service_1.reset(new boost::asio::io_service());
     object_manager_service_2.reset(new boost::asio::io_service());
 
     // start store
-    std::string store_sock_1 = StartStore("1");
-    std::string store_sock_2 = StartStore("2");
+    std::string store_sock_1 = test::StartStore("1", store_executable, "1");
+    std::string store_sock_2 = test::StartStore("2", store_executable, "1");
 
     // start first server
     gcs_client_1 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
@@ -126,8 +35,13 @@ class TestObjectManagerBase : public ::testing::Test {
     om_config_1.num_threads = 4;
     om_config_1.max_sends = 20;
     om_config_1.max_receives = 20;
-    server1.reset(new MockServer(main_service, std::move(object_manager_service_1),
-                                 om_config_1, gcs_client_1));
+    om_config_1.object_chunk_size = (uint64_t)std::pow(10, 5);
+    server1.reset(new test::MockServer(main_service,
+                                       "127.0.0.1",
+                                       "127.0.0.1",
+                                       6379,
+                                       std::move(object_manager_service_1),
+                                       om_config_1, gcs_client_1));
 
     // start second server
     gcs_client_2 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
@@ -136,8 +50,13 @@ class TestObjectManagerBase : public ::testing::Test {
     om_config_2.num_threads = 4;
     om_config_2.max_sends = 20;
     om_config_2.max_receives = 20;
-    server2.reset(new MockServer(main_service, std::move(object_manager_service_2),
-                                 om_config_2, gcs_client_2));
+    om_config_2.object_chunk_size = (uint64_t)std::pow(10, 5);
+    server2.reset(new test::MockServer(main_service,
+                                       "127.0.0.1",
+                                       "127.0.0.1",
+                                       6379,
+                                       std::move(object_manager_service_2),
+                                       om_config_2, gcs_client_2));
 
     // connect to stores.
     ARROW_CHECK_OK(client1.Connect(store_sock_1, "", PLASMA_DEFAULT_RELEASE_DELAY));
@@ -156,18 +75,6 @@ class TestObjectManagerBase : public ::testing::Test {
     ASSERT_TRUE(!s);
   }
 
-  ObjectID WriteDataToClient(plasma::PlasmaClient &client, int64_t data_size) {
-    ObjectID object_id = ObjectID::from_random();
-    RAY_LOG(DEBUG) << "ObjectID Created: " << object_id;
-    uint8_t metadata[] = {5};
-    int64_t metadata_size = sizeof(metadata);
-    std::shared_ptr<Buffer> data;
-    ARROW_CHECK_OK(client.Create(object_id.to_plasma_id(), data_size, metadata,
-                                 metadata_size, &data));
-    ARROW_CHECK_OK(client.Seal(object_id.to_plasma_id()));
-    return object_id;
-  }
-
   void object_added_handler_1(ObjectID object_id) { v1.push_back(object_id); };
 
   void object_added_handler_2(ObjectID object_id) { v2.push_back(object_id); };
@@ -179,8 +86,8 @@ class TestObjectManagerBase : public ::testing::Test {
   std::unique_ptr<boost::asio::io_service> object_manager_service_2;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_1;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_2;
-  std::unique_ptr<MockServer> server1;
-  std::unique_ptr<MockServer> server2;
+  std::unique_ptr<test::MockServer> server1;
+  std::unique_ptr<test::MockServer> server2;
 
   plasma::PlasmaClient client1;
   plasma::PlasmaClient client2;
@@ -188,7 +95,7 @@ class TestObjectManagerBase : public ::testing::Test {
   std::vector<ObjectID> v2;
 };
 
-class StressTestObjectManager : public TestObjectManagerBase {
+class StressTestObjectManager : public StressTestObjectManagerBase {
  public:
   enum TransferPattern {
     PUSH_A_B,
@@ -350,41 +257,41 @@ class StressTestObjectManager : public TestObjectManagerBase {
     switch (transfer_pattern) {
     case PUSH_A_B: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = WriteDataToClient(client1, data_size);
+        ObjectID oid1 = test::WriteDataToClient(client1, data_size);
         status = server1->object_manager_.Push(oid1, client_id_2);
       }
     } break;
     case PUSH_B_A: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid2 = WriteDataToClient(client2, data_size);
+        ObjectID oid2 = test::WriteDataToClient(client2, data_size);
         status = server2->object_manager_.Push(oid2, client_id_1);
       }
     } break;
     case BIDIRECTIONAL_PUSH: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = WriteDataToClient(client1, data_size);
+        ObjectID oid1 = test::WriteDataToClient(client1, data_size);
         status = server1->object_manager_.Push(oid1, client_id_2);
-        ObjectID oid2 = WriteDataToClient(client2, data_size);
+        ObjectID oid2 = test::WriteDataToClient(client2, data_size);
         status = server2->object_manager_.Push(oid2, client_id_1);
       }
     } break;
     case PULL_A_B: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = WriteDataToClient(client1, data_size);
+        ObjectID oid1 = test::WriteDataToClient(client1, data_size);
         status = server2->object_manager_.Pull(oid1);
       }
     } break;
     case PULL_B_A: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid2 = WriteDataToClient(client2, data_size);
+        ObjectID oid2 = test::WriteDataToClient(client2, data_size);
         status = server1->object_manager_.Pull(oid2);
       }
     } break;
     case BIDIRECTIONAL_PULL: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = WriteDataToClient(client1, data_size);
+        ObjectID oid1 = test::WriteDataToClient(client1, data_size);
         status = server2->object_manager_.Pull(oid1);
-        ObjectID oid2 = WriteDataToClient(client2, data_size);
+        ObjectID oid2 = test::WriteDataToClient(client2, data_size);
         status = server1->object_manager_.Pull(oid2);
       }
     } break;
@@ -393,9 +300,9 @@ class StressTestObjectManager : public TestObjectManagerBase {
       std::mt19937 gen(rd());
       std::uniform_int_distribution<> dis(1, 50);
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = WriteDataToClient(client1, data_size + dis(gen));
+        ObjectID oid1 = test::WriteDataToClient(client1, data_size + dis(gen));
         status = server2->object_manager_.Pull(oid1);
-        ObjectID oid2 = WriteDataToClient(client2, data_size + dis(gen));
+        ObjectID oid2 = test::WriteDataToClient(client2, data_size + dis(gen));
         status = server1->object_manager_.Pull(oid2);
       }
     } break;
@@ -434,10 +341,12 @@ TEST_F(StressTestObjectManager, StartStressTestObjectManager) {
   main_service.run();
 }
 
+} // namespace test
+} // namespace object_manager
 }  // namespace ray
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  ray::store_executable = std::string(argv[1]);
+  ray::object_manager::test::store_executable = std::string(argv[1]);
   return RUN_ALL_TESTS();
 }

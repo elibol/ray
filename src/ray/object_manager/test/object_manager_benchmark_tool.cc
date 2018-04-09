@@ -5,111 +5,28 @@
 #include <numeric>
 
 #include "ray/object_manager/object_manager.h"
+#include "object_manager_test_common.h"
 
 namespace ray {
+namespace object_manager {
+namespace test {
 
 std::string store_executable;
 
-int64_t current_time_ms() {
-  std::chrono::milliseconds ms_since_epoch =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch());
-  return ms_since_epoch.count();
-}
-
-class MockServer {
- public:
-  MockServer(boost::asio::io_service &main_service,
-             const std::string &node_ip_address,
-             const std::string &redis_address,
-             int redis_port,
-             std::unique_ptr<boost::asio::io_service> object_manager_service,
-             const ObjectManagerConfig &object_manager_config,
-             std::shared_ptr<gcs::AsyncGcsClient> gcs_client)
-      : object_manager_acceptor_(
-      main_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
-        object_manager_socket_(main_service),
-        gcs_client_(gcs_client),
-        object_manager_(main_service, std::move(object_manager_service),
-                        object_manager_config, gcs_client),
-        main_service_(main_service) {
-    RAY_CHECK_OK(RegisterGcs(node_ip_address, redis_address, redis_port, main_service));
-    // Start listening for clients.
-    DoAcceptObjectManager();
-  }
-
-  ~MockServer() {
-    RAY_CHECK_OK(gcs_client_->client_table().Disconnect());
-    RAY_CHECK_OK(object_manager_.Terminate());
-  }
-
- private:
-  ray::Status RegisterGcs(const std::string &node_ip_address,
-                          const std::string &redis_address, int redis_port,
-                          boost::asio::io_service &io_service) {
-    RAY_RETURN_NOT_OK(gcs_client_->Connect(redis_address, redis_port));
-    RAY_RETURN_NOT_OK(gcs_client_->Attach(io_service));
-
-    ClientTableDataT client_info = gcs_client_->client_table().GetLocalClient();
-    client_info.node_manager_address = node_ip_address;
-    client_info.object_manager_port = object_manager_acceptor_.local_endpoint().port();
-    // Add resource information.
-
-    RAY_LOG(DEBUG) << "Node manager listening on: IP " << client_info.node_manager_address
-                   << " port " << client_info.node_manager_port;
-    RAY_RETURN_NOT_OK(gcs_client_->client_table().Connect(client_info));
-
-    auto node_manager_client_added = [this](gcs::AsyncGcsClient *client, const UniqueID &id,
-                                            const ClientTableDataT &data) {
-    };
-    gcs_client_->client_table().RegisterClientAddedCallback(node_manager_client_added);
-    return Status::OK();
-  }
-
-  void DoAcceptObjectManager() {
-    object_manager_socket_ = boost::asio::ip::tcp::socket(main_service_);
-    object_manager_acceptor_.async_accept(
-        object_manager_socket_, boost::bind(&MockServer::HandleAcceptObjectManager, this,
-                                            boost::asio::placeholders::error));
-  }
-
-  void HandleAcceptObjectManager(const boost::system::error_code &error) {
-    ClientHandler<boost::asio::ip::tcp> client_handler =
-        [this](std::shared_ptr<TcpClientConnection> client) {
-          object_manager_.ProcessNewClient(client);
-        };
-    MessageHandler<boost::asio::ip::tcp> message_handler = [this](
-        std::shared_ptr<TcpClientConnection> client, int64_t message_type,
-        const uint8_t *message) {
-      object_manager_.ProcessClientMessage(client, message_type, message);
-    };
-    // Accept a new local client and dispatch it to the node manager.
-    auto new_connection = TcpClientConnection::Create(client_handler, message_handler,
-                                                      std::move(object_manager_socket_));
-    DoAcceptObjectManager();
-  }
-
-  friend class MultinodeObjectManagerTest;
-
-  boost::asio::ip::tcp::acceptor object_manager_acceptor_;
-  boost::asio::ip::tcp::socket object_manager_socket_;
-  std::shared_ptr<gcs::AsyncGcsClient> gcs_client_;
-  ObjectManager object_manager_;
-  boost::asio::io_service &main_service_;
-};
-
-class MultinodeObjectManagerTest {
+class ObjectManagerBenchmarkTool {
 
  public:
 
-  MultinodeObjectManagerTest(std::string node_ip_address,
+  ObjectManagerBenchmarkTool(std::string node_ip_address,
                              std::string redis_address,
                              int redis_port,
                              int num_threads,
                              int max_sends,
                              int max_receives,
                              std::string mode,
-                             uint64_t object_chunk_size) {
+                             uint64_t object_chunk_size,
+                             const std::string &store_gigabytes_memory) {
+
     SetUp(node_ip_address,
           redis_address,
           redis_port,
@@ -117,21 +34,8 @@ class MultinodeObjectManagerTest {
           max_sends,
           max_receives,
           mode,
-          object_chunk_size);
-  }
-
-  std::string StartStore(const std::string &id) {
-    std::string store_id = "/tmp/store";
-    store_id = store_id + id;
-    std::string plasma_command = store_executable + " -m 8000000000 -s " + store_id +
-        " 1> /dev/null 2> /dev/null &";
-    RAY_LOG(DEBUG) << plasma_command;
-    int ec = system(plasma_command.c_str());
-    if (ec != 0) {
-      throw std::runtime_error("failed to start plasma store.");
-    };
-    sleep(1);
-    return store_id;
+          object_chunk_size,
+          store_gigabytes_memory);
   }
 
   void SetUp(std::string node_ip_address,
@@ -141,55 +45,48 @@ class MultinodeObjectManagerTest {
              int max_sends,
              int max_receives,
              std::string mode,
-             uint64_t object_chunk_size) {
+             uint64_t object_chunk_size,
+             const std::string &store_gigabytes_memory) {
 
     object_manager_service_1.reset(new boost::asio::io_service());
+    work_.reset(new boost::asio::io_service::work(main_service));
 
     // start store
-    std::string store_sock_1 = StartStore(mode);
+    std::string store_sock_1 = StartStore(mode, store_executable, store_gigabytes_memory);
 
     // start first server
     gcs_client_1 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
     ObjectManagerConfig om_config_1;
     om_config_1.store_socket_name = store_sock_1;
-    // good enough settings for m4.16xlarge
     om_config_1.num_threads = num_threads;
     om_config_1.max_sends = max_sends;
     om_config_1.max_receives = max_receives;
     om_config_1.object_chunk_size = object_chunk_size;
-    server1.reset(new MockServer(main_service,
-                                 node_ip_address,
-                                 redis_address,
-                                 redis_port,
-                                 std::move(object_manager_service_1),
-                                 om_config_1,
-                                 gcs_client_1));
+    server1.reset(new test::MockServer(main_service,
+                                     node_ip_address,
+                                     redis_address,
+                                     redis_port,
+                                     std::move(object_manager_service_1),
+                                     om_config_1,
+                                     gcs_client_1));
 
     // connect to stores.
     ARROW_CHECK_OK(client1.Connect(store_sock_1, "", PLASMA_DEFAULT_RELEASE_DELAY));
   }
 
   void TearDown() {
-    arrow::Status client1_status = client1.Disconnect();
-    RAY_CHECK(client1_status.ok());
-    this->server1.reset();
-    int s = system("killall plasma_store &");
-    RAY_CHECK(!s);
-  }
-
-  ObjectID WriteDataToClient(plasma::PlasmaClient &client, int64_t data_size) {
-    ObjectID object_id = ObjectID::from_random();
-    RAY_LOG(DEBUG) << "ObjectID Created: " << object_id;
-    uint8_t metadata[] = {5};
-    int64_t metadata_size = sizeof(metadata);
-    std::shared_ptr<Buffer> data;
-    ARROW_CHECK_OK(client.Create(object_id.to_plasma_id(), data_size, metadata,
-                                 metadata_size, &data));
-    ARROW_CHECK_OK(client.Seal(object_id.to_plasma_id()));
-    return object_id;
+    main_service.post([this](){
+      sleep(1);
+      main_service.stop();
+      ARROW_CHECK_OK(client1.Disconnect());
+      this->server1.reset();
+    });
+    work_.reset();
   }
 
   void ConnectAndExecute(std::string mode, uint64_t object_size, int num_objects, int num_trials) {
+    RAY_LOG(INFO) << "creating " << num_objects*num_trials
+                  << " random objects of size " << object_size;
     if (mode == "send"){
       // Create the objects to send before connecting.
       // The receiver will start timing as soon as the sender connects,
@@ -197,10 +94,11 @@ class MultinodeObjectManagerTest {
       for (int trial=0; trial < num_trials; ++trial){
         send_object_ids.emplace_back(std::unordered_set<ObjectID, UniqueIDHasher>());
         for (int i=0;i<num_objects;++i) {
-          ObjectID oid = WriteDataToClient(client1, object_size);
+          ObjectID oid = test::WriteDataToClient(client1, object_size, 0);
           send_object_ids[trial].insert(oid);
           ignore_send_ids.insert(oid);
         }
+        RAY_LOG(INFO) << "trial " << trial << " created.";
       }
     }
     ClientID client_id_1 = gcs_client_1->client_table().GetLocalClientId();
@@ -220,7 +118,7 @@ class MultinodeObjectManagerTest {
     ray::Status status = ray::Status::OK();
     if (mode == "receive"){
       // send a small object to initiate the send from sending side.
-      init_object = WriteDataToClient(client1, 1);
+      init_object = test::WriteDataToClient(client1, 1, 0);
       status = server1->object_manager_.Push(init_object, remote_client_id);
       RAY_LOG(INFO) << "sent " << init_object;
       // start timer now since the sender will start sending as soon as it receives
@@ -261,14 +159,14 @@ class MultinodeObjectManagerTest {
                   RAY_LOG(DEBUG) << "max=" << max_time << " min=" << min_time;
                   RAY_LOG(DEBUG) << "max-min time " << (max_time-min_time);
 
+                  RAY_LOG(INFO) << "trial " << trial_count << " " << init_object;
                   trial_count += 1;
                   if (trial_count < num_trials) {
                     // clear stats
                     v1.clear();
                     receive_times.clear();
-                    init_object = WriteDataToClient(client1, 1);
+                    init_object = test::WriteDataToClient(client1, 1, 0);
                     Status push_status = server1->object_manager_.Push(init_object, remote_client_id);
-                    RAY_LOG(INFO) << "trial " << trial_count << " " << init_object;
                   } else {
                     std::pair<double_t,double_t> elapsed_stat = mean_std(elapsed_stats_, 3);
                     std::pair<double_t,double_t> gbits_sec_stat = mean_std(gbits_sec_stats_, 3);
@@ -283,8 +181,8 @@ class MultinodeObjectManagerTest {
                     RAY_LOG(INFO) << "max-min time "
                                   << "mean=" << duration_stat.first
                                   << " std=" << duration_stat.second;
+                    TearDown();
                   }
-                  // TearDown();
                 }
               }
           );
@@ -292,7 +190,7 @@ class MultinodeObjectManagerTest {
     } else if (mode == "send"){
       status =
           server1->object_manager_.SubscribeObjAdded(
-              [this, remote_client_id, object_size, num_objects](const RayObjectInfo &object_info) {
+              [this, remote_client_id, object_size, num_objects, num_trials](const RayObjectInfo &object_info) {
                 if (ignore_send_ids.count(object_info.object_id) != 0) {
                   // send objects only when we receive an ObjectID we didn't send.
                   // this is the small object sent from the receiver.
@@ -313,25 +211,15 @@ class MultinodeObjectManagerTest {
                   RAY_LOG(DEBUG) << "sent " << oid;
                 }
                 trial_count += 1;
+                if (trial_count >= num_trials){
+                  TearDown();
+                }
               }
           );
       RAY_CHECK_OK(status);
     } else {
       RAY_LOG(FATAL) << mode << " is not a supported mode.";
     }
-  }
-
-  std::pair<double_t,double_t> mean_std(const std::vector<double_t> &in_v, uint skip_n){
-    std::vector<double_t> v;
-    for (;skip_n<in_v.size();++skip_n) {
-      v.push_back(in_v[skip_n]);
-    }
-    RAY_LOG(DEBUG) << "mean_std with n=" << v.size();
-    double sum = std::accumulate(v.begin(), v.end(), 0.0);
-    double mean = sum / v.size();
-    double sq_sum = std::inner_product(v.begin(), v.end(), v.begin(), 0.0);
-    double stdev = std::sqrt(sq_sum / v.size() - mean * mean);
-    return std::pair<double_t,double_t>(mean, stdev);
   }
 
   boost::asio::io_service main_service;
@@ -343,7 +231,7 @@ class MultinodeObjectManagerTest {
   std::thread p;
   std::unique_ptr<boost::asio::io_service> object_manager_service_1;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_1;
-  std::unique_ptr<MockServer> server1;
+  std::unique_ptr<test::MockServer> server1;
 
   plasma::PlasmaClient client1;
   std::vector<ObjectID> v1;
@@ -358,16 +246,20 @@ class MultinodeObjectManagerTest {
   std::vector<double_t> elapsed_stats_;
   std::vector<double_t> gbits_sec_stats_;
   std::vector<double_t> duration_stats_;
+
+  std::unique_ptr<boost::asio::io_service::work> work_;
 };
 
 
+} // namespace test
+} // namespace object_manager
 }  // namespace ray
 
 int main(int argc, char **argv) {
   const std::string node_ip_address = std::string(argv[1]);
   const std::string redis_address = std::string(argv[2]);
   int redis_port = std::stoi(argv[3]);
-  ray::store_executable = std::string(argv[4]);
+  ray::object_manager::test::store_executable = std::string(argv[4]);
   const std::string mode = std::string(argv[5]);
 
   uint64_t object_size = std::stol(argv[6]);
@@ -378,33 +270,44 @@ int main(int argc, char **argv) {
   int max_sends = std::stoi(argv[10]);
   int max_receives = std::stoi(argv[11]);
   uint64_t object_chunk_size = std::stol(argv[12]);
+  const std::string store_gigabytes_memory = std::string(argv[13]);
+
+  // Compute num chunks (see object_buffer_pool.cc for equivalent computation).
+  uint64_t num_chunks = static_cast<uint64_t>(ceil(static_cast<double>(object_size) / object_chunk_size));
+  uint64_t require_memory = static_cast<uint64_t>(object_size*num_objects*num_trials);
+  uint64_t store_bytes_memory = static_cast<uint64_t>(std::stoi(store_gigabytes_memory)*std::pow(10, 9));
 
   RAY_LOG(INFO) <<"\n"
-      << "node_ip_address=" << node_ip_address << "\n"
-      << "redis_address=" << redis_address << "\n"
-      << "redis_port=" << redis_port << "\n"
-      << "store_executable=" << store_executable << "\n"
+      << "node_ip_address= " << node_ip_address << "\n"
+      << "redis_address=   " << redis_address << "\n"
+      << "redis_port=      " << redis_port << "\n"
+      << "store_executable=" << ray::object_manager::test::store_executable << "\n"
+      << "store_bytes_memory=      " << store_bytes_memory << "\n"
+      << "require_memory(computed)=" << require_memory << "\n"
 
       << "\n"
-      << "mode=" << mode << "\n"
-      << "object_size=" << object_size << "\n"
-      << "num_objects=" << num_objects << "\n"
-      << "num_trials=" << num_trials << "\n"
+      << "mode=                " << mode << "\n"
+      << "num_trials=          " << num_trials << "\n"
+      << "num_objects=         " << num_objects << "\n"
+      << "object_size=         " << object_size << "\n"
+      << "object_chunk_size=   " << object_chunk_size << "\n"
+      << "num_chunks(computed)=" << num_chunks << "\n"
 
       << "\n"
-      << "num_threads=" << num_threads << "\n"
-      << "max_sends=" << max_sends << "\n"
-      << "max_receives=" << max_receives << "\n"
-      << "object_chunk_size=" << object_chunk_size << "\n";
+      << " num_threads=" << num_threads << "\n"
+      << "   max_sends=" << max_sends << "\n"
+      << "max_receives=" << max_receives << "\n";
 
-  MultinodeObjectManagerTest om(node_ip_address,
-                                redis_address,
-                                redis_port,
-                                num_threads,
-                                max_sends,
-                                max_receives,
-                                mode,
-                                object_chunk_size);
+  ray::object_manager::test::ObjectManagerBenchmarkTool om(
+      node_ip_address,
+      redis_address,
+      redis_port,
+      num_threads,
+      max_sends,
+      max_receives,
+      mode,
+      object_chunk_size,
+      store_gigabytes_memory);
 
   om.ConnectAndExecute(mode, object_size, num_objects, num_trials);
   om.main_service.run();

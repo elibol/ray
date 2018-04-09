@@ -143,3 +143,6 @@ build
 
 # Pytest Cache
 **/.pytest_cache
+
+# Profile data
+src/ray/object_manager/test/profile

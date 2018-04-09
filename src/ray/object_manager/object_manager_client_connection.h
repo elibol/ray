@@ -61,6 +61,10 @@ class SenderConnection : public boost::enable_shared_from_this<SenderConnection>
     return conn_->ReadBuffer(buffer, ec);
   }
 
+  ray::Status Close(){
+    return conn_->Close();
+  }
+
   /// \return The ClientID of this connection.
   const ClientID &GetClientID() { return client_id_; }
 

@@ -22,7 +22,7 @@ Raylet::Raylet(boost::asio::io_service &main_service,
       socket_(main_service),
       object_manager_acceptor_(
           main_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
-      object_manager_socket_(main_service),
+      object_manager_socket_(*object_manager_service),
       node_manager_acceptor_(
           main_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
       node_manager_socket_(main_service),

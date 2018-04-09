@@ -9,7 +9,7 @@ ObjectBufferPool::ObjectBufferPool(const std::string &store_socket_name,
 }
 
 uint64_t ObjectBufferPool::GetNumChunks(uint64_t data_size) {
-  return ceil(static_cast<double>(data_size) / chunk_size_);
+  return static_cast<uint64_t>(ceil(static_cast<double>(data_size) / chunk_size_));
 }
 
 const ObjectBufferPool::ChunkInfo &ObjectBufferPool::GetChunk(const ObjectID &object_id,
@@ -55,6 +55,8 @@ const ObjectBufferPool::ChunkInfo &ObjectBufferPool::GetChunk(const ObjectID &ob
 ray::Status ObjectBufferPool::ReleaseBuffer(const ObjectID &object_id) {
   std::lock_guard<std::mutex> lock(pool_mutex_);
   buffer_state_[object_id].references--;
+  RAY_LOG(DEBUG) << "ReleaseBuffer " << object_id << " "
+                 << buffer_state_[object_id].references;
   if (buffer_state_[object_id].references == 0) {
     chunk_info_.erase(object_id);
     std::shared_ptr<plasma::PlasmaClient> store_client = buffer_state_[object_id].client;
@@ -103,6 +105,11 @@ const ObjectBufferPool::ChunkInfo &ObjectBufferPool::CreateChunk(
       create_failure_buffers_[object_id] = mutable_vec;
     }
     uint64_t num_chunks = BuildChunks(object_id, mutable_data, data_size, metadata_size);
+    if (num_chunks != GetNumChunks(data_size)){
+      RAY_LOG(FATAL) << "num_chunks mismatch: "
+                     << "got " << num_chunks
+                     << "expected " << GetNumChunks(data_size);
+    }
     buffer_state_.emplace(
         std::piecewise_construct, std::forward_as_tuple(object_id),
         std::forward_as_tuple(store_client, num_chunks, BufferStateType::CREATE));

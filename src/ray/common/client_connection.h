@@ -53,6 +53,16 @@ class ServerConnection {
   void ReadBuffer(const std::vector<boost::asio::mutable_buffer> &buffer,
                   boost::system::error_code &ec);
 
+  ray::Status Close(){
+    boost::system::error_code ec;
+    // This interrupts in-transit data (see documentation on close).
+    socket_.close(ec);
+    if (ec.value() != 0){
+      return ray::Status::IOError(ec.message());
+    }
+    return ray::Status::OK();
+  }
+
  protected:
   /// The socket connection to the server.
   boost::asio::basic_stream_socket<T> socket_;

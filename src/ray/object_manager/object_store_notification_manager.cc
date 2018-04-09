@@ -47,7 +47,7 @@ void ObjectStoreNotificationManager::ProcessStoreLength(
 void ObjectStoreNotificationManager::ProcessStoreNotification(
     const boost::system::error_code &error) {
   if (error) {
-    throw std::runtime_error("ObjectStore may have died.");
+    RAY_LOG(FATAL) << "ObjectStore may have died.";
   }
 
   const auto &object_info = flatbuffers::GetRoot<ObjectInfo>(notification_.data());
