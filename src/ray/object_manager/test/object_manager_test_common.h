@@ -69,23 +69,27 @@ std::string StartStore(const std::string &id, const std::string &store_executabl
   return store_id;
 }
 
-ObjectID WriteDataToClient(plasma::PlasmaClient &client, uint64_t data_size, uint64_t metadata_size=1) {
+ObjectID WriteDataToClient(plasma::PlasmaClient &client, uint64_t data_size, uint64_t metadata_size=1, bool randomize_data=false) {
   ObjectID object_id = ObjectID::from_random();
   RAY_LOG(DEBUG) << "ObjectID Created: " << object_id;
   uint8_t metadata[metadata_size];
   // Write random metadata.
-  srand(time(NULL));
-  for (uint64_t i = 0; i < metadata_size; i++)
-    metadata[i] = (uint8_t) (rand() % 256);
+  if (randomize_data) {
+    srand(time(NULL));
+    for (uint64_t i = 0; i < metadata_size; i++)
+      metadata[i] = (uint8_t) (rand() % 256);
+  }
   RAY_CHECK(sizeof(metadata) == metadata_size);
   std::shared_ptr<Buffer> data;
   ARROW_CHECK_OK(client.Create(object_id.to_plasma_id(), data_size, metadata,
                                metadata_size, &data));
   // Write random data to buffer.
   uint8_t *buffer = data->mutable_data();
-  srand(time(NULL));
-  for (uint64_t i = 0; i < data_size; i++)
-    buffer[i] = (uint8_t) (rand() % 256);
+  if (randomize_data) {
+    srand(time(NULL));
+    for (uint64_t i = 0; i < data_size; i++)
+      buffer[i] = (uint8_t) (rand() % 256);
+  }
   ARROW_CHECK_OK(client.Seal(object_id.to_plasma_id()));
   return object_id;
 }

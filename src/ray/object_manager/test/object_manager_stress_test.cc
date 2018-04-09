@@ -257,41 +257,41 @@ class StressTestObjectManager : public StressTestObjectManagerBase {
     switch (transfer_pattern) {
     case PUSH_A_B: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = test::WriteDataToClient(client1, data_size);
+        ObjectID oid1 = test::WriteDataToClient(client1, data_size, 10, true);
         status = server1->object_manager_.Push(oid1, client_id_2);
       }
     } break;
     case PUSH_B_A: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid2 = test::WriteDataToClient(client2, data_size);
+        ObjectID oid2 = test::WriteDataToClient(client2, data_size, 10, true);
         status = server2->object_manager_.Push(oid2, client_id_1);
       }
     } break;
     case BIDIRECTIONAL_PUSH: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = test::WriteDataToClient(client1, data_size);
+        ObjectID oid1 = test::WriteDataToClient(client1, data_size, 10, true);
         status = server1->object_manager_.Push(oid1, client_id_2);
-        ObjectID oid2 = test::WriteDataToClient(client2, data_size);
+        ObjectID oid2 = test::WriteDataToClient(client2, data_size, 10, true);
         status = server2->object_manager_.Push(oid2, client_id_1);
       }
     } break;
     case PULL_A_B: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = test::WriteDataToClient(client1, data_size);
+        ObjectID oid1 = test::WriteDataToClient(client1, data_size, 10, true);
         status = server2->object_manager_.Pull(oid1);
       }
     } break;
     case PULL_B_A: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid2 = test::WriteDataToClient(client2, data_size);
+        ObjectID oid2 = test::WriteDataToClient(client2, data_size, 10, true);
         status = server1->object_manager_.Pull(oid2);
       }
     } break;
     case BIDIRECTIONAL_PULL: {
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = test::WriteDataToClient(client1, data_size);
+        ObjectID oid1 = test::WriteDataToClient(client1, data_size, 10, true);
         status = server2->object_manager_.Pull(oid1);
-        ObjectID oid2 = test::WriteDataToClient(client2, data_size);
+        ObjectID oid2 = test::WriteDataToClient(client2, data_size, 10, true);
         status = server1->object_manager_.Pull(oid2);
       }
     } break;
@@ -300,9 +300,9 @@ class StressTestObjectManager : public StressTestObjectManagerBase {
       std::mt19937 gen(rd());
       std::uniform_int_distribution<> dis(1, 50);
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = test::WriteDataToClient(client1, data_size + dis(gen));
+        ObjectID oid1 = test::WriteDataToClient(client1, data_size + dis(gen), dis(gen), true);
         status = server2->object_manager_.Pull(oid1);
-        ObjectID oid2 = test::WriteDataToClient(client2, data_size + dis(gen));
+        ObjectID oid2 = test::WriteDataToClient(client2, data_size + dis(gen), dis(gen), true);
         status = server1->object_manager_.Pull(oid2);
       }
     } break;
