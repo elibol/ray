@@ -146,7 +146,6 @@ class MockServer {
   }
 
   void DoAcceptObjectManager() {
-    // object_manager_socket_ = boost::asio::ip::tcp::socket(*object_manager_service_);
     object_manager_acceptor_.async_accept(
         object_manager_socket_, boost::bind(&MockServer::HandleAcceptObjectManager, this,
                                             boost::asio::placeholders::error));
