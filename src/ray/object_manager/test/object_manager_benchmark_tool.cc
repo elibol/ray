@@ -86,7 +86,7 @@ class ObjectManagerBenchmarkTool {
 
   void ConnectAndExecute(std::string mode, uint64_t object_size, int num_objects, int num_trials) {
     RAY_LOG(INFO) << "creating " << num_objects*num_trials
-                  << " random objects of size " << object_size;
+                  << " empty objects of size " << object_size;
     if (mode == "send"){
       // Create the objects to send before connecting.
       // The receiver will start timing as soon as the sender connects,
