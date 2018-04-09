@@ -159,7 +159,7 @@ class ObjectManagerBenchmarkTool {
                   RAY_LOG(DEBUG) << "max=" << max_time << " min=" << min_time;
                   RAY_LOG(DEBUG) << "max-min time " << (max_time-min_time);
 
-                  RAY_LOG(INFO) << "trial " << trial_count << " " << init_object;
+                  RAY_LOG(DEBUG) << "trial " << trial_count << " " << init_object;
                   trial_count += 1;
                   if (trial_count < num_trials) {
                     // clear stats
@@ -203,9 +203,9 @@ class ObjectManagerBenchmarkTool {
                   RAY_CHECK_OK(async_status);
                 }
                 int64_t elapsed = current_time_ms() - start_time;
-                RAY_LOG(INFO) << "trial=" << trial_count
-                              << " elapsed=" << elapsed
-                              << " object_id=" << object_info.object_id;
+                RAY_LOG(DEBUG) << "trial=" << trial_count
+                               << " elapsed=" << elapsed
+                               << " object_id=" << object_info.object_id;
 
                 for (auto oid : send_object_ids[trial_count]) {
                   RAY_LOG(DEBUG) << "sent " << oid;
