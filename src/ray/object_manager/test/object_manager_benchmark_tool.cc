@@ -126,8 +126,9 @@ class ObjectManagerBenchmarkTool {
       status =
           server1->object_manager_.SubscribeObjAdded(
               [this, remote_client_id, object_size,
-                  num_objects, num_trials](const RayObjectInfo &object_info) {
-                if (init_object == object_info.object_id){
+                  num_objects, num_trials](const ObjectInfoT &object_info) {
+                ObjectID object_id = ObjectID::from_binary(object_info.object_id);
+                if (init_object == object_id){
                   // ignore the initial object we sent out to start the experiment.
                   // start the timer here since we will certainly register object added
                   // before the remote object manager does.
@@ -136,7 +137,7 @@ class ObjectManagerBenchmarkTool {
                 }
 
                 // record stats
-                v1.push_back(object_info.object_id);
+                v1.push_back(object_id);
                 receive_times.push_back(current_time_ms());
 
                 if ((int)v1.size() == num_objects) {
@@ -190,13 +191,14 @@ class ObjectManagerBenchmarkTool {
     } else if (mode == "send"){
       status =
           server1->object_manager_.SubscribeObjAdded(
-              [this, remote_client_id, object_size, num_objects, num_trials](const RayObjectInfo &object_info) {
-                if (ignore_send_ids.count(object_info.object_id) != 0) {
+              [this, remote_client_id, object_size, num_objects, num_trials](const ObjectInfoT &object_info) {
+                ObjectID object_id = ObjectID::from_binary(object_info.object_id);
+                if (ignore_send_ids.count(object_id) != 0) {
                   // send objects only when we receive an ObjectID we didn't send.
                   // this is the small object sent from the receiver.
                   return;
                 }
-                RAY_LOG(DEBUG) << "received " << object_info.object_id;
+                RAY_LOG(DEBUG) << "received " << object_id;
                 start_time = current_time_ms();
                 for (auto oid : send_object_ids[trial_count]) {
                   ray::Status async_status = server1->object_manager_.Push(oid, remote_client_id);
@@ -205,7 +207,7 @@ class ObjectManagerBenchmarkTool {
                 int64_t elapsed = current_time_ms() - start_time;
                 RAY_LOG(DEBUG) << "trial=" << trial_count
                                << " elapsed=" << elapsed
-                               << " object_id=" << object_info.object_id;
+                               << " object_id=" << object_id;
 
                 for (auto oid : send_object_ids[trial_count]) {
                   RAY_LOG(DEBUG) << "sent " << oid;

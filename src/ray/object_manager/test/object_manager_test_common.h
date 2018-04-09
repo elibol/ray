@@ -118,7 +118,6 @@ class MockServer {
   }
 
   ~MockServer() {
-    RAY_CHECK_OK(object_manager_.Terminate());
     object_manager_acceptor_.cancel();
     RAY_CHECK_OK(gcs_client_->client_table().Disconnect());
   }

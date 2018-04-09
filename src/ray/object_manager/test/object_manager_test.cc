@@ -23,9 +23,7 @@ class TestObjectManager : public ::testing::Test {
                                  " 1> /dev/null 2> /dev/null &";
     RAY_LOG(DEBUG) << plasma_command;
     int ec = system(plasma_command.c_str());
-    if (ec != 0) {
-      throw std::runtime_error("failed to start plasma store.");
-    };
+    RAY_CHECK(ec == 0);
     return store_id;
   }
 
@@ -141,11 +139,12 @@ class TestObjectManagerBasic : public TestObjectManager {
 
   void TestNotifications() {
     ray::Status status = ray::Status::OK();
-    status =
-        server1->object_manager_.SubscribeObjAdded([this](const RayObjectInfo &object_info) {
-          object_added_handler_1(object_info.object_id);
+    status = server1->object_manager_.SubscribeObjAdded(
+        [this](const ObjectInfoT &object_info) {
+          object_added_handler_1(ObjectID::from_binary(object_info.object_id));
           if (v1.size() == num_expected_objects) {
-            NotificationTestComplete(created_object_id, object_info.object_id);
+            NotificationTestComplete(created_object_id,
+                                     ObjectID::from_binary(object_info.object_id));
           }
         });
     RAY_CHECK_OK(status);

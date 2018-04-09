@@ -20,12 +20,17 @@ ObjectManager::ObjectManager(asio::io_service &main_service,
       transfer_queue_(),
       num_transfers_send_(0),
       num_transfers_receive_(0) {
+  // This is needed to decouple dependence on object_manager_service_ stopping before
+  // the object_manager_service_ acceptor is started in the parent process
+  // (i.e. the server). The acceptor is the only work that object_manager_service_ is
+  // given that keeps it running until establishing
+  // connections to remote object managers, and it's read from after the object manager
+  // is initialized.
   work_.reset(new boost::asio::io_service::work(*object_manager_service_));
   main_service_ = &main_service;
   config_ = config;
-  store_notification_.SubscribeObjAdded([this](const RayObjectInfo &object_info) {
-    NotifyDirectoryObjectAdd(object_info);
-  });
+  store_notification_.SubscribeObjAdded(
+      [this](const ObjectInfoT &object_info) { NotifyDirectoryObjectAdd(object_info); });
   store_notification_.SubscribeObjDeleted(
       [this](const ObjectID &oid) { NotifyDirectoryObjectDeleted(oid); });
   StartIOService();
@@ -47,12 +52,18 @@ ObjectManager::ObjectManager(asio::io_service &main_service,
   // TODO(hme) Client ID is never set with this constructor.
   main_service_ = &main_service;
   config_ = config;
-  store_notification_.SubscribeObjAdded([this](const RayObjectInfo &object_info) {
-    NotifyDirectoryObjectAdd(object_info);
-  });
+  store_notification_.SubscribeObjAdded(
+      [this](const ObjectInfoT &object_info) { NotifyDirectoryObjectAdd(object_info); });
   store_notification_.SubscribeObjDeleted(
       [this](const ObjectID &oid) { NotifyDirectoryObjectDeleted(oid); });
   StartIOService();
+}
+
+ObjectManager::~ObjectManager() {
+  // work_.reset() can eventually be used to allow the asio service to execute any
+  // remaining methods before joining threads; we would no longer invoke stop explicitly.
+  work_.reset();
+  StopIOService();
 }
 
 void ObjectManager::StartIOService() {
@@ -70,10 +81,12 @@ void ObjectManager::StopIOService() {
   }
 }
 
-void ObjectManager::NotifyDirectoryObjectAdd(const RayObjectInfo &object_info) {
-  local_objects_[object_info.object_id] = std::move(object_info);
+
+void ObjectManager::NotifyDirectoryObjectAdd(const ObjectInfoT &object_info) {
+  ObjectID object_id = ObjectID::from_binary(object_info.object_id);
+  local_objects_[object_id] = object_info;
   ray::Status status =
-      object_directory_->ReportObjectAdded(object_info.object_id, client_id_);
+      object_directory_->ReportObjectAdded(object_id, client_id_, object_info);
 }
 
 void ObjectManager::NotifyDirectoryObjectDeleted(const ObjectID &object_id) {
@@ -81,19 +94,8 @@ void ObjectManager::NotifyDirectoryObjectDeleted(const ObjectID &object_id) {
   ray::Status status = object_directory_->ReportObjectRemoved(object_id, client_id_);
 }
 
-ray::Status ObjectManager::Terminate() {
-  // TODO(hme): Update to allow work to be completed before exiting.
-  work_.reset();
-  StopIOService();
-  connection_pool_.Terminate();
-  RAY_CHECK_OK(object_directory_->Terminate());
-  store_notification_.Terminate();
-  buffer_pool_.Terminate();
-  return ray::Status::OK();
-}
-
 ray::Status ObjectManager::SubscribeObjAdded(
-    std::function<void(const RayObjectInfo &)> callback) {
+    std::function<void(const ObjectInfoT &)> callback) {
   store_notification_.SubscribeObjAdded(callback);
   return ray::Status::OK();
 }
@@ -215,9 +217,9 @@ ray::Status ObjectManager::Push(const ObjectID &object_id, const ClientID &clien
     Status status = object_directory_->GetInformation(
         client_id,
         [this, object_id, client_id](const RemoteConnectionInfo &info) {
-          RayObjectInfo object_info = local_objects_[object_id];
+          ObjectInfoT object_info = local_objects_[object_id];
           uint64_t data_size =
-              static_cast<uint64_t>(object_info.object_size + object_info.metadata_size);
+              static_cast<uint64_t>(object_info.data_size + object_info.metadata_size);
           uint64_t metadata_size = static_cast<uint64_t>(object_info.metadata_size);
           uint64_t num_chunks = buffer_pool_.GetNumChunks(data_size);
           // RAY_LOG(INFO) << "queuing " << object_id << " num_chunks=" << num_chunks;
