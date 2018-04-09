@@ -42,7 +42,6 @@ class MockServer {
   ~MockServer() {
     object_manager_acceptor_.cancel();
     RAY_CHECK_OK(gcs_client_->client_table().Disconnect());
-    RAY_CHECK_OK(object_manager_.Terminate());
   }
 
  private:
@@ -228,7 +227,8 @@ class MultinodeObjectManagerTest {
       status =
           server1->object_manager_.SubscribeObjAdded(
               [this, remote_client_id, object_size,
-                  num_objects, num_trials](const ObjectID &object_id) {
+                  num_objects, num_trials](const ObjectInfoT &object_info) {
+                ObjectID object_id = ObjectID::from_binary(object_info.object_id);
                 if (init_object == object_id){
                   // ignore the initial object we sent out to start the experiment.
                   // start the timer here since we will certainly register object added
@@ -292,7 +292,8 @@ class MultinodeObjectManagerTest {
     } else if (mode == "send"){
       status =
           server1->object_manager_.SubscribeObjAdded(
-              [this, remote_client_id, object_size, num_objects, num_trials](const ObjectID &incoming_object_id) {
+              [this, remote_client_id, object_size, num_objects, num_trials](const ObjectInfoT &object_info) {
+                ObjectID incoming_object_id = ObjectID::from_binary(object_info.object_id);
                 if (ignore_send_ids.count(incoming_object_id) != 0) {
                   // send objects only when we receive an ObjectID we didn't send.
                   // this is the small object sent from the receiver.
