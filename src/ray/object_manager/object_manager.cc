@@ -87,7 +87,6 @@ void ObjectManager::StopIOService() {
   }
 }
 
-
 void ObjectManager::NotifyDirectoryObjectAdd(const ObjectInfoT &object_info) {
   ObjectID object_id = ObjectID::from_binary(object_info.object_id);
   local_objects_[object_id] = object_info;
@@ -213,7 +212,7 @@ ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
 ray::Status ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
   if (local_objects_.count(object_id) == 0) {
     // TODO(hme): Do not retry indefinitely...
-    main_service_->post([this, object_id, client_id]() { Push(object_id, client_id); });
+    main_service_->post([this, object_id, client_id]() { RAY_CHECK_OK(Push(object_id, client_id)); });
     return ray::Status::OK();
   }
 
@@ -325,7 +324,8 @@ ray::Status ObjectManager::SendObjectHeaders(const ObjectID &object_id,
                                              uint64_t data_size, uint64_t metadata_size,
                                              uint64_t chunk_index,
                                              std::shared_ptr<SenderConnection> conn) {
-  std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> chunk_status = buffer_pool_.GetChunk(object_id, data_size, metadata_size, chunk_index);
+  std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> chunk_status =
+      buffer_pool_.GetChunk(object_id, data_size, metadata_size, chunk_index);
   ObjectBufferPool::ChunkInfo chunk_info = chunk_status.first;
 
   if (!chunk_status.second.ok()) {
@@ -493,7 +493,8 @@ ray::Status ObjectManager::ExecuteReceiveObject(
   RAY_LOG(DEBUG) << "ExecuteReceiveObject " << client_id << " " << object_id << " "
                  << chunk_index;
 
-  std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> chunk_status = buffer_pool_.CreateChunk(object_id, data_size, metadata_size, chunk_index);
+  std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> chunk_status =
+      buffer_pool_.CreateChunk(object_id, data_size, metadata_size, chunk_index);
   ObjectBufferPool::ChunkInfo chunk_info = chunk_status.first;
   if (chunk_status.second.ok()) {
     // Avoid handling this chunk if it's already being handled by another process.
@@ -513,12 +514,11 @@ ray::Status ObjectManager::ExecuteReceiveObject(
     uint64_t buffer_length = buffer_pool_.GetBufferLength(chunk_index, data_size);
     std::vector<uint8_t> mutable_vec;
     mutable_vec.resize(buffer_length);
-    uint8_t *mutable_data = mutable_vec.data();
     std::vector<boost::asio::mutable_buffer> buffer;
-    buffer.push_back(asio::buffer(mutable_data, buffer_length));
+    buffer.push_back(asio::buffer(mutable_vec, buffer_length));
     boost::system::error_code ec;
     conn->ReadBuffer(buffer, ec);
-    if (ec.value() != 0){
+    if (ec.value() != 0) {
       RAY_LOG(ERROR) << ec.message();
     }
     // TODO(hme): If the object isn't local, create a pull request for this chunk.
