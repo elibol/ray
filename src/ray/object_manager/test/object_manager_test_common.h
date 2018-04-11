@@ -59,15 +59,20 @@ static inline void flushall_redis(void) {
 std::string StartStore(const std::string &id, const std::string &store_executable, std::string gigabytes_memory) {
   std::string store_id = "/tmp/store";
   store_id = store_id + id;
+  std::string store_pid = store_id + ".pid";
   std::string plasma_command = store_executable + " -m " + gigabytes_memory + "000000000 -s " + store_id +
-      " 1> /dev/null 2> /dev/null &";
+      " 1> /dev/null 2> /dev/null &" + " echo $! > " +
+      store_pid;
   RAY_LOG(DEBUG) << plasma_command;
-  int ec = system(plasma_command.c_str());
-  if (ec != 0) {
-    throw std::runtime_error("failed to start plasma store.");
-  };
+  RAY_CHECK(!system(plasma_command.c_str()));
   sleep(1);
   return store_id;
+}
+
+void StopStore(std::string store_id) {
+  std::string store_pid = store_id + ".pid";
+  std::string kill_1 = "kill -9 `cat " + store_pid + "`";
+  RAY_CHECK(!system(kill_1.c_str()));
 }
 
 ObjectID WriteDataToClient(plasma::PlasmaClient &client, uint64_t data_size, uint64_t metadata_size=1, bool randomize_data=false) {

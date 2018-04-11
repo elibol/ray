@@ -25,17 +25,17 @@ class StressTestObjectManagerBase : public ::testing::Test {
     object_manager_service_2.reset(new boost::asio::io_service());
 
     // start store
-    std::string store_sock_1 = test::StartStore("1", store_executable, "1");
-    std::string store_sock_2 = test::StartStore("2", store_executable, "1");
+    store_id_1 = StartStore(UniqueID::from_random().hex(), store_executable, "1");
+    store_id_2 = StartStore(UniqueID::from_random().hex(), store_executable, "1");
 
     // start first server
     gcs_client_1 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
     ObjectManagerConfig om_config_1;
-    om_config_1.store_socket_name = store_sock_1;
+    om_config_1.store_socket_name = store_id_1;
     om_config_1.num_threads = 4;
     om_config_1.max_sends = 20;
     om_config_1.max_receives = 20;
-    om_config_1.object_chunk_size = (uint64_t)std::pow(10, 5);
+    om_config_1.object_chunk_size = static_cast<uint64_t>(std::pow(10, 4));
     server1.reset(new test::MockServer(main_service,
                                        "127.0.0.1",
                                        "127.0.0.1",
@@ -46,11 +46,11 @@ class StressTestObjectManagerBase : public ::testing::Test {
     // start second server
     gcs_client_2 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
     ObjectManagerConfig om_config_2;
-    om_config_2.store_socket_name = store_sock_2;
+    om_config_2.store_socket_name = store_id_2;
     om_config_2.num_threads = 4;
     om_config_2.max_sends = 20;
     om_config_2.max_receives = 20;
-    om_config_2.object_chunk_size = (uint64_t)std::pow(10, 5);
+    om_config_2.object_chunk_size = static_cast<uint64_t>(std::pow(10, 4));
     server2.reset(new test::MockServer(main_service,
                                        "127.0.0.1",
                                        "127.0.0.1",
@@ -59,8 +59,8 @@ class StressTestObjectManagerBase : public ::testing::Test {
                                        om_config_2, gcs_client_2));
 
     // connect to stores.
-    ARROW_CHECK_OK(client1.Connect(store_sock_1, "", PLASMA_DEFAULT_RELEASE_DELAY));
-    ARROW_CHECK_OK(client2.Connect(store_sock_2, "", PLASMA_DEFAULT_RELEASE_DELAY));
+    ARROW_CHECK_OK(client1.Connect(store_id_1, "", PLASMA_DEFAULT_RELEASE_DELAY));
+    ARROW_CHECK_OK(client2.Connect(store_id_2, "", PLASMA_DEFAULT_RELEASE_DELAY));
   }
 
   void TearDown() {
@@ -71,8 +71,8 @@ class StressTestObjectManagerBase : public ::testing::Test {
     this->server1.reset();
     this->server2.reset();
 
-    int s = system("killall plasma_store &");
-    ASSERT_TRUE(!s);
+    StopStore(store_id_1);
+    StopStore(store_id_2);
   }
 
   void object_added_handler_1(ObjectID object_id) { v1.push_back(object_id); };
@@ -93,6 +93,9 @@ class StressTestObjectManagerBase : public ::testing::Test {
   plasma::PlasmaClient client2;
   std::vector<ObjectID> v1;
   std::vector<ObjectID> v2;
+
+  std::string store_id_1;
+  std::string store_id_2;
 };
 
 class StressTestObjectManager : public StressTestObjectManagerBase {
@@ -171,7 +174,7 @@ class StressTestObjectManager : public StressTestObjectManagerBase {
     async_loop_index += 1;
     if ((uint)async_loop_index < async_loop_patterns.size()) {
       TransferPattern pattern = async_loop_patterns[async_loop_index];
-      TransferTestExecute(100, 3 * std::pow(10, 5) - 1, pattern);
+      TransferTestExecute(100, 3 * std::pow(10, 4) - 1, pattern);
     } else {
       main_service.stop();
     }
