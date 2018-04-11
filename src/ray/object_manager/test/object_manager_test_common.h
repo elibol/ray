@@ -30,7 +30,7 @@ namespace ray {
 namespace object_manager {
 namespace test {
 
-std::pair<double_t,double_t> mean_std(const std::vector<double_t> &in_v, uint skip_n){
+std::pair<double_t,double_t> mean_std(const std::vector<double_t> &in_v, uint64_t skip_n){
   std::vector<double_t> v;
   for (;skip_n<in_v.size();++skip_n) {
     v.push_back(in_v[skip_n]);

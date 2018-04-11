@@ -15,7 +15,8 @@ MAX_RECEIVES=4
 # note that the sender plasma store will need at lease
 # object_size*num_objects*num_trials memory to run the experiment.
 STORE_GIGABYTE_MEMORY=8
-      OBJECT_SIZE=10000000
-OBJECT_CHUNK_SIZE=1000000
+      OBJECT_SIZE=1000000
+OBJECT_CHUNK_SIZE=100000
 NUM_OBJECTS=1
-NUM_TRIALS=100
+NUM_TRIALS=1000
+SKIP_K=100
