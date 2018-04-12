@@ -235,11 +235,11 @@ class ObjectManagerBenchmarkTool {
     ObjectID oid = test::WriteDataToClient(client1, 1, 0);
     init_objects.insert(oid);
     Status push_status = server1->object_manager_.Push(oid, remote_client_id);
-    RAY_LOG(INFO) << "init sent " << oid;
+    RAY_LOG(DEBUG) << "init sent " << oid;
   }
 
   void BeginTrial(ClientID remote_client_id){
-    RAY_LOG(INFO) << "begin trial " << trial_count << " " << current_time_ms();
+    RAY_LOG(DEBUG) << "begin trial " << trial_count << " " << current_time_ms();
     local_trial_ready = false;
     remote_trial_ready = false;
     start_time = current_time_ms();
@@ -266,7 +266,7 @@ class ObjectManagerBenchmarkTool {
     RAY_LOG(DEBUG) << "GBits/sec " << gbits_sec;
     RAY_LOG(DEBUG) << "max=" << max_time << " min=" << min_time;
     RAY_LOG(DEBUG) << "max-min time " << (max_time-min_time);
-    RAY_LOG(INFO) << "TrialComplete " << trial_count;
+    RAY_LOG(DEBUG) << "TrialComplete " << trial_count;
     trial_count += 1;
     // clear stats
     v1.clear();
