@@ -26,8 +26,9 @@ Raylet::Raylet(boost::asio::io_service &main_service,
       acceptor_(main_service, boost::asio::local::stream_protocol::endpoint(socket_name)),
       socket_(main_service),
       object_manager_acceptor_(
-          main_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
-      object_manager_socket_(main_service),
+          *object_manager_service,
+          boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
+      object_manager_socket_(*object_manager_service),
       node_manager_acceptor_(
           main_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
       node_manager_socket_(main_service) {
@@ -37,16 +38,13 @@ Raylet::Raylet(boost::asio::io_service &main_service,
   DoAcceptNodeManager();
 
   RAY_CHECK_OK(RegisterGcs(node_ip_address, socket_name_,
-                           object_manager_config.store_socket_name,
-                           redis_address, redis_port, main_service,
-                           node_manager_config));
+                           object_manager_config.store_socket_name, redis_address,
+                           redis_port, main_service, node_manager_config));
 
   RAY_CHECK_OK(RegisterPeriodicTimer(main_service));
 }
 
-Raylet::~Raylet() {
-  RAY_CHECK_OK(gcs_client_->client_table().Disconnect());
-}
+Raylet::~Raylet() { RAY_CHECK_OK(gcs_client_->client_table().Disconnect()); }
 
 ray::Status Raylet::RegisterPeriodicTimer(boost::asio::io_service &io_service) {
   boost::posix_time::milliseconds timer_period_ms(100);

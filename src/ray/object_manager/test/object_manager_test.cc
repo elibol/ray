@@ -22,8 +22,9 @@ class MockServer {
              const ObjectManagerConfig &object_manager_config,
              std::shared_ptr<gcs::AsyncGcsClient> gcs_client)
       : object_manager_acceptor_(
-            main_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
-        object_manager_socket_(main_service),
+            *object_manager_service,
+            boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
+        object_manager_socket_(*object_manager_service),
         gcs_client_(gcs_client),
         object_manager_(main_service, std::move(object_manager_service),
                         object_manager_config, gcs_client) {

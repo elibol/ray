@@ -204,7 +204,8 @@ ray::Status ObjectManager::Push(const ObjectID &object_id, const ClientID &clien
         client_id,
         [this, object_id, client_id](const RemoteConnectionInfo &info) {
           transfer_queue_.QueueSend(client_id, object_id, info);
-          RAY_CHECK_OK(DequeueTransfers());
+          object_manager_service_->dispatch(
+              [this]() { RAY_CHECK_OK(DequeueTransfers()); });
         },
         [](const Status &status) {
           // Push is best effort, so do nothing here.
@@ -269,7 +270,8 @@ ray::Status ObjectManager::TransferCompleted(TransferQueue::TransferType type) {
   } else {
     std::atomic_fetch_sub(&num_transfers_receive_, 1);
   }
-  return DequeueTransfers();
+  object_manager_service_->post([this]() { DequeueTransfers(); });
+  return ray::Status::OK();
 };
 
 ray::Status ObjectManager::ExecuteSendObject(
@@ -471,7 +473,7 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn
   ObjectID object_id = ObjectID::from_binary(object_header->object_id()->str());
   int64_t object_size = (int64_t)object_header->object_size();
   transfer_queue_.QueueReceive(conn->GetClientID(), object_id, object_size, conn);
-  RAY_CHECK_OK(DequeueTransfers());
+  object_manager_service_->dispatch([this]() { RAY_CHECK_OK(DequeueTransfers()); });
 }
 
 ray::Status ObjectManager::ExecuteReceiveObject(
