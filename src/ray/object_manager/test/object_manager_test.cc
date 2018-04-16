@@ -34,9 +34,6 @@ class TestObjectManager : public ::testing::Test {
   void SetUp() {
     test::flushall_redis();
 
-    object_manager_service_1.reset(new boost::asio::io_service());
-    object_manager_service_2.reset(new boost::asio::io_service());
-
     // start store
     store_id_1 = StartStore(UniqueID::from_random().hex());
     store_id_2 = StartStore(UniqueID::from_random().hex());
@@ -58,7 +55,6 @@ class TestObjectManager : public ::testing::Test {
                                        "127.0.0.1",
                                        "127.0.0.1",
                                        6379,
-                                       std::move(object_manager_service_1),
                                        om_config_1, gcs_client_1));
 
     // start second server
@@ -73,7 +69,6 @@ class TestObjectManager : public ::testing::Test {
                                        "127.0.0.1",
                                        "127.0.0.1",
                                        6379,
-                                       std::move(object_manager_service_2),
                                        om_config_2, gcs_client_2));
 
     // connect to stores.
@@ -100,8 +95,6 @@ class TestObjectManager : public ::testing::Test {
  protected:
   std::thread p;
   boost::asio::io_service main_service;
-  std::unique_ptr<boost::asio::io_service> object_manager_service_1;
-  std::unique_ptr<boost::asio::io_service> object_manager_service_2;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_1;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_2;
   std::unique_ptr<test::MockServer> server1;

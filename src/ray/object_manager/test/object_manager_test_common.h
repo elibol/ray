@@ -143,16 +143,13 @@ class MockServer {
              const std::string &node_ip_address,
              const std::string &redis_address,
              int redis_port,
-             std::unique_ptr<boost::asio::io_service> object_manager_service,
              const ObjectManagerConfig &object_manager_config,
              std::shared_ptr<gcs::AsyncGcsClient> gcs_client)
-      : object_manager_acceptor_(
-      *object_manager_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
+      : object_manager_acceptor_(main_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
         gcs_client_(gcs_client),
         main_service_(main_service),
-        object_manager_service_(object_manager_service.get()),
-        object_manager_socket_(*object_manager_service),
-        object_manager_(main_service, std::move(object_manager_service),
+        object_manager_socket_(main_service),
+        object_manager_(main_service,
                         object_manager_config, gcs_client) {
     RAY_CHECK_OK(RegisterGcs(node_ip_address, redis_address, redis_port, main_service));
     // Start listening for clients.
@@ -216,7 +213,6 @@ class MockServer {
   boost::asio::ip::tcp::acceptor object_manager_acceptor_;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_;
   boost::asio::io_service &main_service_;
-  boost::asio::io_service *object_manager_service_;
   boost::asio::ip::tcp::socket object_manager_socket_;
   ObjectManager object_manager_;
 };

@@ -26,7 +26,6 @@ class ObjectManagerBenchmarkTool {
                              uint64_t object_chunk_size,
                              const std::string &store_gigabytes_memory) {
 
-    object_manager_service_1.reset(new boost::asio::io_service());
     work_.reset(new boost::asio::io_service::work(main_service));
 
     // start store
@@ -43,7 +42,6 @@ class ObjectManagerBenchmarkTool {
                                      node_ip_address,
                                      redis_address,
                                      redis_port,
-                                     std::move(object_manager_service_1),
                                      om_config_1,
                                      gcs_client_1));
 
@@ -298,7 +296,6 @@ class ObjectManagerBenchmarkTool {
   std::unordered_set<ObjectID, UniqueIDHasher> ignore_send_ids;
 
   std::thread p;
-  std::unique_ptr<boost::asio::io_service> object_manager_service_1;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_1;
   std::unique_ptr<test::MockServer> server1;
 
