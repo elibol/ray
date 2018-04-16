@@ -33,15 +33,13 @@ namespace ray {
 struct ObjectManagerConfig {
   /// The time in milliseconds to wait before retrying a pull
   /// that failed due to client id lookup.
-  int pull_timeout_ms = 100;
-  /// Size of thread pool.
-  int num_threads = 2;
+  uint pull_timeout_ms;
   /// Maximum number of sends allowed.
-  int max_sends = 20;
+  int max_sends;
   /// Maximum number of receives allowed.
-  int max_receives = 20;
+  int max_receives;
   /// Object chunk size, in bytes
-  uint64_t object_chunk_size = std::pow(10, 8);
+  uint64_t object_chunk_size;
   // TODO(hme): Implement num retries (to avoid infinite retries).
   std::string store_socket_name;
 };
@@ -154,7 +152,7 @@ class ObjectManager {
 
  private:
   ClientID client_id_;
-  ObjectManagerConfig config_;
+  const ObjectManagerConfig config_;
   std::unique_ptr<ObjectDirectoryInterface> object_directory_;
   ObjectStoreNotificationManager store_notification_;
   ObjectBufferPool buffer_pool_;
@@ -167,7 +165,7 @@ class ObjectManager {
   boost::asio::io_service *main_service_;
 
   /// Used to create "work" for an io service, so when it's run, it doesn't exit.
-  std::unique_ptr<boost::asio::io_service::work> work_;
+  boost::asio::io_service::work work_;
 
   /// Thread pool for executing asynchronous handlers.
   /// These run the object_manager_service_, which handle
@@ -191,6 +189,10 @@ class ObjectManager {
   /// Variables to track number of concurrent sends and receives.
   std::atomic<int> num_transfers_send_;
   std::atomic<int> num_transfers_receive_;
+
+  /// Size of thread pool. This is the sum of
+  /// config_.max_sends and config_.max_receives
+  const int num_threads_;
 
   /// Cache of locally available objects.
   std::unordered_map<ObjectID, ObjectInfoT, UniqueIDHasher> local_objects_;

@@ -12,26 +12,23 @@ ObjectManager::ObjectManager(asio::io_service &main_service,
                              std::shared_ptr<gcs::AsyncGcsClient> gcs_client)
     // TODO(hme): Eliminate knowledge of GCS.
     : client_id_(gcs_client->client_table().GetLocalClientId()),
+      config_(config),
       object_directory_(new ObjectDirectory(gcs_client)),
-      store_notification_(main_service, config.store_socket_name),
-      // release_delay of 2 * config.max_sends is to ensure the pool does not release
+      store_notification_(main_service, config_.store_socket_name),
+      // release_delay of 2 * config_.max_sends is to ensure the pool does not release
       // an object prematurely whenever we reach the maximum number of sends.
-      buffer_pool_(config.store_socket_name, config.object_chunk_size,
-                   /*release_delay=*/2 * config.max_sends),
+      buffer_pool_(config_.store_socket_name, config_.object_chunk_size,
+                   /*release_delay=*/2 * config_.max_sends),
       object_manager_service_(std::move(object_manager_service)),
+      work_(*object_manager_service_),
       connection_pool_(),
       transfer_queue_(),
       num_transfers_send_(0),
-      num_transfers_receive_(0) {
-  // This is needed to decouple dependence on object_manager_service_ stopping before
-  // the object_manager_service_ acceptor is started in the parent process
-  // (i.e. the server). The acceptor is the only work that object_manager_service_ is
-  // given that keeps it running until establishing
-  // connections to remote object managers, and it's read from after the object manager
-  // is initialized.
-  work_.reset(new boost::asio::io_service::work(*object_manager_service_));
+      num_transfers_receive_(0),
+      num_threads_(config_.max_sends + config_.max_receives) {
+  RAY_CHECK(config_.max_sends > 0);
+  RAY_CHECK(config_.max_receives > 0);
   main_service_ = &main_service;
-  config_ = config;
   store_notification_.SubscribeObjAdded(
       [this](const ObjectInfoT &object_info) { NotifyDirectoryObjectAdd(object_info); });
   store_notification_.SubscribeObjDeleted(
@@ -43,21 +40,24 @@ ObjectManager::ObjectManager(asio::io_service &main_service,
                              std::unique_ptr<asio::io_service> object_manager_service,
                              const ObjectManagerConfig &config,
                              std::unique_ptr<ObjectDirectoryInterface> od)
-    : object_directory_(std::move(od)),
-      store_notification_(main_service, config.store_socket_name),
-      // release_delay of 2 * config.max_sends is to ensure the pool does not release
+    : config_(config),
+      object_directory_(std::move(od)),
+      store_notification_(main_service, config_.store_socket_name),
+      // release_delay of 2 * config_.max_sends is to ensure the pool does not release
       // an object prematurely whenever we reach the maximum number of sends.
-      buffer_pool_(config.store_socket_name, config.object_chunk_size,
-                   /*release_delay=*/2 * config.max_sends),
+      buffer_pool_(config_.store_socket_name, config_.object_chunk_size,
+                   /*release_delay=*/2 * config_.max_sends),
       object_manager_service_(std::move(object_manager_service)),
+      work_(*object_manager_service_),
       connection_pool_(),
       transfer_queue_(),
       num_transfers_send_(0),
-      num_transfers_receive_(0) {
-  work_.reset(new boost::asio::io_service::work(*object_manager_service_));
+      num_transfers_receive_(0),
+      num_threads_(config_.max_sends + config_.max_receives) {
+  RAY_CHECK(config_.max_sends > 0);
+  RAY_CHECK(config_.max_receives > 0);
   // TODO(hme) Client ID is never set with this constructor.
   main_service_ = &main_service;
-  config_ = config;
   store_notification_.SubscribeObjAdded(
       [this](const ObjectInfoT &object_info) { NotifyDirectoryObjectAdd(object_info); });
   store_notification_.SubscribeObjDeleted(
@@ -65,15 +65,10 @@ ObjectManager::ObjectManager(asio::io_service &main_service,
   StartIOService();
 }
 
-ObjectManager::~ObjectManager() {
-  // work_.reset() can eventually be used to allow the asio service to execute any
-  // remaining methods before joining threads; we would no longer invoke stop explicitly.
-  work_.reset();
-  StopIOService();
-}
+ObjectManager::~ObjectManager() { StopIOService(); }
 
 void ObjectManager::StartIOService() {
-  for (int i = 0; i < config_.num_threads; ++i) {
+  for (int i = 0; i < num_threads_; ++i) {
     io_threads_.emplace_back(std::thread(&ObjectManager::IOServiceLoop, this));
   }
 }
@@ -82,7 +77,7 @@ void ObjectManager::IOServiceLoop() { object_manager_service_->run(); }
 
 void ObjectManager::StopIOService() {
   object_manager_service_->stop();
-  for (int i = 0; i < config_.num_threads; ++i) {
+  for (int i = 0; i < num_threads_; ++i) {
     io_threads_[i].join();
   }
 }
@@ -228,7 +223,6 @@ ray::Status ObjectManager::Push(const ObjectID &object_id, const ClientID &clien
               static_cast<uint64_t>(object_info.data_size + object_info.metadata_size);
           uint64_t metadata_size = static_cast<uint64_t>(object_info.metadata_size);
           uint64_t num_chunks = buffer_pool_.GetNumChunks(data_size);
-          // RAY_LOG(INFO) << "queuing " << object_id << " num_chunks=" << num_chunks;
           for (uint64_t chunk_index = 0; chunk_index < num_chunks; ++chunk_index) {
             transfer_queue_.QueueSend(client_id, object_id, data_size, metadata_size,
                                       chunk_index, info);
@@ -247,7 +241,8 @@ ray::Status ObjectManager::DequeueTransfers() {
   ray::Status status = ray::Status::OK();
   // Dequeue sends.
   while (true) {
-    if (std::atomic_fetch_add(&num_transfers_send_, 1) <= config_.max_sends) {
+    int num_transfers_send = std::atomic_fetch_add(&num_transfers_send_, 1);
+    if (num_transfers_send < config_.max_sends) {
       TransferQueue::SendRequest req;
       bool exists = transfer_queue_.DequeueSendIfPresent(&req);
       if (exists) {
@@ -269,7 +264,8 @@ ray::Status ObjectManager::DequeueTransfers() {
   }
   // Dequeue receives.
   while (true) {
-    if (std::atomic_fetch_add(&num_transfers_receive_, 1) <= config_.max_receives) {
+    int num_transfers_receive = std::atomic_fetch_add(&num_transfers_receive_, 1);
+    if (num_transfers_receive < config_.max_receives) {
       TransferQueue::ReceiveRequest req;
       bool exists = transfer_queue_.DequeueReceiveIfPresent(&req);
       if (exists) {
@@ -332,6 +328,9 @@ ray::Status ObjectManager::SendObjectHeaders(const ObjectID &object_id,
   if (!chunk_status.second.ok()) {
     // This is the first thread to invoke GetChunk => Get failed on the
     // plasma client.
+    // No reference is acquired for this chunk, so no need to release the chunk.
+    // TODO(hme): Retry send here? If so, store RemoteConnectionInfo in SenderConnection.
+    RAY_CHECK_OK(TransferCompleted(TransferQueue::TransferType::SEND));
     return chunk_status.second;
   }
   // Create buffer.
@@ -343,21 +342,14 @@ ray::Status ObjectManager::SendObjectHeaders(const ObjectID &object_id,
   ray::Status status =
       conn->WriteMessage(object_manager_protocol::MessageType_PushRequest, fbb.GetSize(),
                          fbb.GetBufferPointer());
-  if (!status.ok()) {
-    // Push failed. Deal with partial objects on the receiving end.
-    buffer_pool_.ReleaseGetChunk(object_id, chunk_index);
-    // TODO(hme): Try to invoke disconnect on sender connection, then remove it.
-    RAY_CHECK_OK(
-        connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, conn));
-    return status;
-  }
-
+  RAY_CHECK_OK(status);
   return SendObjectData(object_id, chunk_info, conn);
 }
 
 ray::Status ObjectManager::SendObjectData(const ObjectID &object_id,
                                           const ObjectBufferPool::ChunkInfo &chunk_info,
                                           std::shared_ptr<SenderConnection> conn) {
+  // TransferQueue::SendContext context = transfer_queue_.GetContext(context_id);
   boost::system::error_code ec;
   std::vector<asio::const_buffer> buffer;
   buffer.push_back(asio::buffer(chunk_info.data, chunk_info.buffer_length));
@@ -525,6 +517,8 @@ ray::Status ObjectManager::ExecuteReceiveObject(
     // TODO(hme): If the object isn't local, create a pull request for this chunk.
   }
   conn->ProcessMessages();
+  RAY_LOG(DEBUG) << "ReceiveCompleted " << client_id_ << " " << object_id << " "
+                 << num_transfers_receive_ << "/" << config_.max_receives;
   RAY_CHECK_OK(TransferCompleted(TransferQueue::TransferType::RECEIVE));
   return Status::OK();
 }

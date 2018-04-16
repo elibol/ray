@@ -41,10 +41,19 @@ class TestObjectManager : public ::testing::Test {
     store_id_1 = StartStore(UniqueID::from_random().hex());
     store_id_2 = StartStore(UniqueID::from_random().hex());
 
+    uint pull_timeout_ms = 1;
+    int max_sends = 2;
+    int max_receives = 2;
+    uint64_t object_chunk_size = static_cast<uint64_t>(std::pow(10, 3));
+
     // start first server
     gcs_client_1 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
     ObjectManagerConfig om_config_1;
     om_config_1.store_socket_name = store_id_1;
+    om_config_1.pull_timeout_ms = pull_timeout_ms;
+    om_config_1.max_sends = max_sends;
+    om_config_1.max_receives = max_receives;
+    om_config_1.object_chunk_size = object_chunk_size;
     server1.reset(new test::MockServer(main_service,
                                        "127.0.0.1",
                                        "127.0.0.1",
@@ -56,6 +65,10 @@ class TestObjectManager : public ::testing::Test {
     gcs_client_2 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
     ObjectManagerConfig om_config_2;
     om_config_2.store_socket_name = store_id_2;
+    om_config_2.pull_timeout_ms = pull_timeout_ms;
+    om_config_2.max_sends = max_sends;
+    om_config_2.max_receives = max_receives;
+    om_config_2.object_chunk_size = object_chunk_size;
     server2.reset(new test::MockServer(main_service,
                                        "127.0.0.1",
                                        "127.0.0.1",
