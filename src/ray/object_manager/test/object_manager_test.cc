@@ -20,7 +20,7 @@ class TestObjectManager : public ::testing::Test {
     std::string store_id = "/tmp/store";
     store_id = store_id + id;
     std::string store_pid = store_id + ".pid";
-    std::string plasma_command = store_executable + " -m 1000000000 -s " + store_id +
+    std::string plasma_command = store_executable + " -m 4000000000 -s " + store_id +
                                  " 1> /dev/null 2> /dev/null &" + " echo $! > " +
                                  store_pid;
 
@@ -44,7 +44,7 @@ class TestObjectManager : public ::testing::Test {
     uint pull_timeout_ms = 1;
     int max_sends = 2;
     int max_receives = 2;
-    uint64_t object_chunk_size = static_cast<uint64_t>(std::pow(10, 3));
+    uint64_t object_chunk_size = static_cast<uint64_t>(std::pow(10, 10));
 
     // start first server
     gcs_client_1 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
@@ -93,18 +93,6 @@ class TestObjectManager : public ::testing::Test {
     StopStore(store_id_2);
   }
 
-  ObjectID WriteDataToClient(plasma::PlasmaClient &client, int64_t data_size) {
-    ObjectID object_id = ObjectID::from_random();
-    RAY_LOG(DEBUG) << "ObjectID Created: " << object_id;
-    uint8_t metadata[] = {5};
-    int64_t metadata_size = sizeof(metadata);
-    std::shared_ptr<Buffer> data;
-    ARROW_CHECK_OK(client.Create(object_id.to_plasma_id(), data_size, metadata,
-                                 metadata_size, &data));
-    ARROW_CHECK_OK(client.Seal(object_id.to_plasma_id()));
-    return object_id;
-  }
-
   void object_added_handler_1(ObjectID object_id) { v1.push_back(object_id); };
 
   void object_added_handler_2(ObjectID object_id) { v2.push_back(object_id); };
@@ -136,6 +124,9 @@ class TestObjectManagerBasic : public TestObjectManager {
   ClientID client_id_2;
 
   ObjectID created_object_id;
+  enum class TestMode : int { NOTIFICATION = 0, TRANSFER };
+
+  TestMode current_test_mode;
 
   void WaitConnections() {
     client_id_1 = gcs_client_1->client_table().GetLocalClientId();
@@ -158,9 +149,13 @@ class TestObjectManagerBasic : public TestObjectManager {
   }
 
   void TestNotifications() {
+    current_test_mode = TestMode::NOTIFICATION;
     ray::Status status = ray::Status::OK();
     status = server1->object_manager_.SubscribeObjAdded(
         [this](const ObjectInfoT &object_info) {
+          if (current_test_mode != TestMode::NOTIFICATION) {
+            return;
+          }
           object_added_handler_1(ObjectID::from_binary(object_info.object_id));
           if (v1.size() == num_expected_objects) {
             NotificationTestComplete(created_object_id,
@@ -170,14 +165,38 @@ class TestObjectManagerBasic : public TestObjectManager {
     RAY_CHECK_OK(status);
 
     num_expected_objects = 1;
-    uint data_size = 1000000;
+    uint64_t data_size = static_cast<uint64_t>(std::pow(10, 9));
     created_object_id = WriteDataToClient(client1, data_size);
   }
 
   void NotificationTestComplete(ObjectID object_id_1, ObjectID object_id_2) {
     ASSERT_EQ(object_id_1, object_id_2);
-    main_service.stop();
+    v1.clear();
+    TestLargeObjectTransfer();
   }
+
+  void TestLargeObjectTransfer() {
+    current_test_mode = TestMode::TRANSFER;
+    ray::Status status = ray::Status::OK();
+    status = server2->object_manager_.SubscribeObjAdded(
+        [this](const ObjectInfoT &object_info) {
+          if (current_test_mode != TestMode::TRANSFER) {
+            return;
+          }
+          ObjectID remote_object_id = ObjectID::from_binary(object_info.object_id);
+          ASSERT_EQ(created_object_id, remote_object_id);
+          CompareHashes(client1, client2, created_object_id, remote_object_id);
+          CompareObjects(client1, client2, created_object_id, remote_object_id);
+          TestLargeObjectTransferComplete();
+        });
+    num_expected_objects = 1;
+    uint64_t data_size = static_cast<uint64_t>(std::pow(10, 9));
+    uint64_t metadata_size = static_cast<uint64_t>(std::pow(10, 6));
+    created_object_id = WriteDataToClient(client1, data_size, metadata_size, true);
+    RAY_CHECK_OK(server2->object_manager_.Pull(created_object_id));
+  }
+
+  void TestLargeObjectTransferComplete() { main_service.stop(); }
 
   void TestConnections() {
     RAY_LOG(DEBUG) << "\n"
