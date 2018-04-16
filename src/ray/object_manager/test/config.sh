@@ -9,7 +9,6 @@ if [ ! -d $PROFILE_DIR ]; then
 fi
 
 
-MAX_THREADS=4
 MAX_SENDS=4
 MAX_RECEIVES=4
 # note that the sender plasma store will need at lease

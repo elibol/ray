@@ -20,7 +20,6 @@ class ObjectManagerBenchmarkTool {
   ObjectManagerBenchmarkTool(std::string node_ip_address,
                              std::string redis_address,
                              int redis_port,
-                             int num_threads,
                              int max_sends,
                              int max_receives,
                              std::string mode,
@@ -31,12 +30,12 @@ class ObjectManagerBenchmarkTool {
     work_.reset(new boost::asio::io_service::work(main_service));
 
     // start store
-    std::string store_sock_1 = StartStore(mode, store_executable, store_gigabytes_memory);
+    store_id = StartStore(mode, store_executable, store_gigabytes_memory);
 
     // start first server
     gcs_client_1 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
     ObjectManagerConfig om_config_1;
-    om_config_1.store_socket_name = store_sock_1;
+    om_config_1.store_socket_name = store_id;
     om_config_1.max_sends = max_sends;
     om_config_1.max_receives = max_receives;
     om_config_1.object_chunk_size = object_chunk_size;
@@ -49,12 +48,13 @@ class ObjectManagerBenchmarkTool {
                                      gcs_client_1));
 
     // connect to stores.
-    ARROW_CHECK_OK(client1.Connect(store_sock_1, "", PLASMA_DEFAULT_RELEASE_DELAY));
+    ARROW_CHECK_OK(client1.Connect(store_id, "", PLASMA_DEFAULT_RELEASE_DELAY));
   }
 
   void TearDown() {
     main_service.post([this](){
       sleep(1);
+      StopStore(store_id);
       main_service.stop();
       ARROW_CHECK_OK(client1.Disconnect());
       this->server1.reset();
@@ -257,15 +257,18 @@ class ObjectManagerBenchmarkTool {
     double_t gbits_sec = gbits/(elapsed/1000.0);
     int64_t min_time = *std::min_element(receive_times.begin(), receive_times.end());
     int64_t max_time = *std::max_element(receive_times.begin(), receive_times.end());
-    elapsed_stats_.push_back(elapsed);
-    gbits_sec_stats_.push_back(gbits_sec);
-    duration_stats_.push_back((double)max_time-(double)min_time);
-    RAY_LOG(DEBUG) << "elapsed milliseconds " << elapsed;
-    RAY_LOG(DEBUG) << "GBits transferred " << gbits;
-    RAY_LOG(DEBUG) << "GBits/sec " << gbits_sec;
-    RAY_LOG(DEBUG) << "max=" << max_time << " min=" << min_time;
-    RAY_LOG(DEBUG) << "max-min time " << (max_time-min_time);
-    RAY_LOG(INFO) << "TrialComplete " << trial_count;
+    if (elapsed != 0){
+      // Only record trial if it took longer than 0 ms.
+      elapsed_stats_.push_back(elapsed);
+      gbits_sec_stats_.push_back(gbits_sec);
+      duration_stats_.push_back((double)max_time-(double)min_time);
+      RAY_LOG(DEBUG) << "elapsed milliseconds " << elapsed;
+      RAY_LOG(DEBUG) << "GBits transferred " << gbits;
+      RAY_LOG(DEBUG) << "GBits/sec " << gbits_sec;
+      RAY_LOG(DEBUG) << "max=" << max_time << " min=" << min_time;
+      RAY_LOG(DEBUG) << "max-min time " << (max_time-min_time);
+      RAY_LOG(INFO) << "TrialComplete " << trial_count;
+    }
     trial_count += 1;
     // clear stats
     v1.clear();
@@ -290,6 +293,7 @@ class ObjectManagerBenchmarkTool {
   boost::asio::io_service main_service;
 
  protected:
+  std::string store_id;
   std::vector<std::unordered_set<ObjectID, UniqueIDHasher>> send_object_ids;
   std::unordered_set<ObjectID, UniqueIDHasher> ignore_send_ids;
 
@@ -335,12 +339,11 @@ int main(int argc, char **argv) {
   int num_objects = std::stoi(argv[7]);
   int num_trials = std::stoi(argv[8]);
 
-  int num_threads = std::stoi(argv[9]);
-  int max_sends = std::stoi(argv[10]);
-  int max_receives = std::stoi(argv[11]);
-  uint64_t object_chunk_size = (uint64_t) std::stol(argv[12]);
-  const std::string store_gigabytes_memory = std::string(argv[13]);
-  uint64_t skip_k = (uint64_t) std::stol(argv[14]);
+  int max_sends = std::stoi(argv[9]);
+  int max_receives = std::stoi(argv[10]);
+  uint64_t object_chunk_size = (uint64_t) std::stol(argv[11]);
+  const std::string store_gigabytes_memory = std::string(argv[12]);
+  uint64_t skip_k = (uint64_t) std::stol(argv[13]);
 
   // Compute num chunks (see object_buffer_pool.cc for equivalent computation).
   uint64_t num_chunks = static_cast<uint64_t>(ceil(static_cast<double>(object_size) / object_chunk_size));
@@ -365,7 +368,6 @@ int main(int argc, char **argv) {
       << "num_chunks(computed)=" << num_chunks << "\n"
 
       << "\n"
-      << " num_threads=" << num_threads << "\n"
       << "   max_sends=" << max_sends << "\n"
       << "max_receives=" << max_receives << "\n";
 
@@ -373,7 +375,6 @@ int main(int argc, char **argv) {
       node_ip_address,
       redis_address,
       redis_port,
-      num_threads,
       max_sends,
       max_receives,
       mode,
