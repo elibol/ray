@@ -24,6 +24,7 @@ namespace asio = boost::asio;
 
 namespace ray {
 
+/// \class ConnectionPool Connection pool for all connections needed by the ObjectManager.
 class ConnectionPool {
  public:
   /// Callbacks for GetSender.
@@ -33,8 +34,12 @@ class ConnectionPool {
   /// Connection type to distinguish between message and transfer connections.
   enum class ConnectionType : int { MESSAGE = 0, TRANSFER };
 
-  /// Connection pool for all connections needed by the ObjectManager.
   ConnectionPool();
+
+  ~ConnectionPool();
+
+  template <typename T>
+  ray::Status CloseConnections(std::vector<std::shared_ptr<T>> connections);
 
   /// Register a receiver connection.
   ///
@@ -76,14 +81,12 @@ class ConnectionPool {
   /// \return Status of invoking this method.
   ray::Status ReleaseSender(ConnectionType type, std::shared_ptr<SenderConnection> conn);
 
-  // TODO(hme): Implement with error handling.
   /// Remove a sender connection. This is invoked if the connection is no longer
   /// usable.
   ///
-  /// \param type The type of connection.
   /// \param conn The actual connection.
   /// \return Status of invoking this method.
-  ray::Status RemoveSender(ConnectionType type, std::shared_ptr<SenderConnection> conn);
+  void RemoveSender(std::shared_ptr<SenderConnection> conn);
 
   /// This object cannot be copied for thread-safety.
   RAY_DISALLOW_COPY_AND_ASSIGN(ConnectionPool);
@@ -108,6 +111,10 @@ class ConnectionPool {
   /// Removes the given receiver for ClientID from the given map.
   void Remove(ReceiverMapType &conn_map, const ClientID &client_id,
               std::shared_ptr<TcpClientConnection> conn);
+
+  /// Removes the given sender for ClientID from the given map.
+  void Remove(SenderMapType &conn_map, const ClientID &client_id,
+              std::shared_ptr<SenderConnection> conn);
 
   /// Returns the count of sender connections to ClientID.
   uint64_t Count(SenderMapType &conn_map, const ClientID &client_id);

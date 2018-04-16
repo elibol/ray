@@ -4,6 +4,35 @@ namespace ray {
 
 ConnectionPool::ConnectionPool() {}
 
+ConnectionPool::~ConnectionPool() {
+  std::vector<SenderMapType> sender_maps = {
+      message_send_connections_,
+      transfer_send_connections_,
+  };
+  std::vector<ReceiverMapType> receiver_maps = {
+      message_receive_connections_,
+      transfer_receive_connections_,
+  };
+  for (auto sender_connections: sender_maps){
+    for (auto pair : sender_connections) {
+      CloseConnections<SenderConnection>(pair.second);
+    }
+  }
+  for (auto receiver_connections: receiver_maps){
+    for (auto pair : receiver_connections) {
+      CloseConnections<TcpClientConnection>(pair.second);
+    }
+  }
+}
+
+template <typename T>
+ray::Status ConnectionPool::CloseConnections(std::vector<std::shared_ptr<T>> connections){
+  for (std::shared_ptr<T> conn : connections) {
+    RAY_CHECK_OK(conn->Close());
+  }
+  return ray::Status::OK();
+}
+
 void ConnectionPool::RegisterReceiver(ConnectionType type, const ClientID &client_id,
                                       std::shared_ptr<TcpClientConnection> &conn) {
   std::unique_lock<std::mutex> guard(connection_mutex);
@@ -52,6 +81,17 @@ ray::Status ConnectionPool::GetSender(ConnectionType type, const ClientID &clien
   return ray::Status::OK();
 }
 
+void ConnectionPool::RemoveSender(std::shared_ptr<SenderConnection> conn) {
+  std::unique_lock<std::mutex> guard(connection_mutex);
+  ClientID client_id = conn->GetClientID();
+  if (message_send_connections_.count(client_id) != 0) {
+    Remove(message_send_connections_, client_id, conn);
+  }
+  if (transfer_send_connections_.count(client_id) != 0) {
+    Remove(transfer_send_connections_, client_id, conn);
+  }
+}
+
 ray::Status ConnectionPool::ReleaseSender(ConnectionType type,
                                           std::shared_ptr<SenderConnection> conn) {
   std::unique_lock<std::mutex> guard(connection_mutex);
@@ -84,6 +124,22 @@ void ConnectionPool::Remove(ReceiverMapType &conn_map, const ClientID &client_id
     return;
   }
   connections.erase(connections.begin() + pos);
+  conn->Close();
+}
+
+void ConnectionPool::Remove(SenderMapType &conn_map, const ClientID &client_id,
+                            std::shared_ptr<SenderConnection> conn) {
+  if (conn_map.count(client_id) == 0) {
+    return;
+  }
+  std::vector<std::shared_ptr<SenderConnection>> &connections = conn_map[client_id];
+  int64_t pos =
+      std::find(connections.begin(), connections.end(), conn) - connections.begin();
+  if (pos >= (int64_t)connections.size()) {
+    return;
+  }
+  connections.erase(connections.begin() + pos);
+  conn->Close();
 }
 
 uint64_t ConnectionPool::Count(SenderMapType &conn_map, const ClientID &client_id) {
