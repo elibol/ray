@@ -179,7 +179,7 @@ class StressTestObjectManager : public StressTestObjectManagerBase {
     async_loop_index += 1;
     if ((uint)async_loop_index < async_loop_patterns.size()) {
       TransferPattern pattern = async_loop_patterns[async_loop_index];
-      TransferTestExecute(100, 3 * std::pow(10, 4) - 1, pattern);
+      TransferTestExecute(100, 3 * std::pow(10, 3) - 1, pattern);
     } else {
       main_service.stop();
     }
