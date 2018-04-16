@@ -26,10 +26,6 @@ ADD_RAY_TEST(test/object_manager_test STATIC_LINK_LIBS ray_static ${PLASMA_STATI
 ADD_RAY_TEST(test/object_manager_stress_test STATIC_LINK_LIBS ray_static ${PLASMA_STATIC_LIB} ${ARROW_STATIC_LIB} object_manager_test_common gtest gtest_main pthread ${Boost_SYSTEM_LIBRARY})
 ADD_RAY_TEST(test/object_manager_benchmark_tool STATIC_LINK_LIBS ray_static ${PLASMA_STATIC_LIB} ${ARROW_STATIC_LIB} object_manager_test_common gtest gtest_main pthread ${Boost_SYSTEM_LIBRARY})
 
-# -lprofiler seems to be set somewhere else, as profiling works regardless of the
-# following line.
-RAY_TEST_LINK_LIBRARIES(test/object_manager_benchmark_tool -lprofiler)
-
 add_library(object_manager object_manager.cc object_manager.h ${OBJECT_MANAGER_FBS_OUTPUT_FILES})
 target_link_libraries(object_manager common ray_static ${PLASMA_STATIC_LIB} ${ARROW_STATIC_LIB} ${Boost_SYSTEM_LIBRARY})
 
