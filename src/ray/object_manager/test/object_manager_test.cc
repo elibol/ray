@@ -16,21 +16,6 @@ class TestObjectManager : public ::testing::Test {
  public:
   TestObjectManager() {}
 
-  std::string StartStore(const std::string &id) {
-    std::string store_id = "/tmp/store";
-    store_id = store_id + id;
-    std::string store_pid = store_id + ".pid";
-    std::string plasma_command = store_executable + " -m 4000000000 -s " + store_id +
-                                 " 1> /dev/null 2> /dev/null &" + " echo $! > " +
-                                 store_pid;
-
-    RAY_LOG(DEBUG) << plasma_command;
-    int ec = system(plasma_command.c_str());
-    RAY_CHECK(ec == 0);
-    sleep(1);
-    return store_id;
-  }
-
   void SetUp() {
     test::flushall_redis();
 
@@ -38,8 +23,8 @@ class TestObjectManager : public ::testing::Test {
     object_manager_service_2.reset(new boost::asio::io_service());
 
     // start store
-    store_id_1 = StartStore(UniqueID::from_random().hex());
-    store_id_2 = StartStore(UniqueID::from_random().hex());
+    store_id_1 = StartStore(UniqueID::from_random().hex(), store_executable, "4");
+    store_id_2 = StartStore(UniqueID::from_random().hex(), store_executable, "4");
 
     uint pull_timeout_ms = 1;
     int max_sends = 2;
