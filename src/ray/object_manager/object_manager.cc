@@ -84,6 +84,7 @@ void ObjectManager::StopIOService() {
 void ObjectManager::NotifyDirectoryObjectAdd(const ObjectInfoT &object_info) {
   ObjectID object_id = ObjectID::from_binary(object_info.object_id);
   local_objects_[object_id] = object_info;
+  PullSucceeded(object_id);
   ray::Status status =
       object_directory_->ReportObjectAdded(object_id, client_id_, object_info);
 }
@@ -105,18 +106,19 @@ ray::Status ObjectManager::SubscribeObjDeleted(
   return ray::Status::OK();
 }
 
-ray::Status ObjectManager::Pull(const ObjectID &object_id) {
+ray::Status ObjectManager::Pull(const ObjectID &object_id,
+                                uint64_t num_attempts,
+                                const ObjectTransferCallback &success,
+                                const ObjectTransferCallback &failure) {
+  if (ObjectInTransit(object_id) || ObjectLocal(object_id)){
+    return ray::Status::OK();
+  }
+  CreateObjectTransfer(object_id, num_attempts,
+                       *main_service_,
+                       config_.pull_timeout_ms,
+                       success,
+                       failure);
   return PullGetLocations(object_id);
-}
-
-void ObjectManager::SchedulePull(const ObjectID &object_id, int wait_ms) {
-  pull_requests_[object_id] = std::shared_ptr<boost::asio::deadline_timer>(
-      new asio::deadline_timer(*main_service_, boost::posix_time::milliseconds(wait_ms)));
-  pull_requests_[object_id]->async_wait(
-      [this, object_id](const boost::system::error_code &error_code) {
-        pull_requests_.erase(object_id);
-        RAY_CHECK_OK(PullGetLocations(object_id));
-      });
 }
 
 ray::Status ObjectManager::PullGetLocations(const ObjectID &object_id) {
@@ -132,25 +134,34 @@ ray::Status ObjectManager::PullGetLocations(const ObjectID &object_id) {
 void ObjectManager::GetLocationsSuccess(const std::vector<ray::ClientID> &client_ids,
                                         const ray::ObjectID &object_id) {
   RAY_CHECK(!client_ids.empty());
-  ClientID client_id = client_ids.front();
-  ray::Status status_code = Pull(object_id, client_id);
+  AddObjectTransferClients(object_id, client_ids, DefaultNumRetries(object_id));
+  TryPull(object_id);
 }
 
 void ObjectManager::GetLocationsFailed(const ObjectID &object_id) {
-  SchedulePull(object_id, config_.pull_timeout_ms);
+  RetryGetLocations(object_id);
 }
 
-ray::Status ObjectManager::Pull(const ObjectID &object_id, const ClientID &client_id) {
-  return PullEstablishConnection(object_id, client_id);
-};
+ray::Status ObjectManager::Pull(const ObjectID &object_id,
+                                const ClientID &client_id,
+                                uint64_t num_attempts,
+                                const ObjectTransferCallback &success,
+                                const ObjectTransferCallback &failure) {
+  if (ObjectLocal(object_id)) {
+    return ray::Status::OK();
+  } else if(ObjectInTransit(object_id)) {
+    AddObjectTransferClient(object_id, client_id, num_attempts, success, failure);
+  } else {
+    CreateObjectTransfer(object_id, num_attempts, *main_service_,
+                         config_.pull_timeout_ms, nullptr, nullptr);
+    AddObjectTransferClient(object_id, client_id, num_attempts, success, failure);
+    TryPull(object_id);
+  }
+  return ray::Status::OK();
+}
 
 ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
                                                    const ClientID &client_id) {
-  // Check if object is already local, and client_id is not itself.
-  if (local_objects_.count(object_id) != 0 || client_id == client_id_) {
-    return ray::Status::OK();
-  }
-
   // Acquire a message connection and send pull request.
   ray::Status status;
   std::shared_ptr<SenderConnection> conn;
@@ -158,10 +169,7 @@ ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
   status = connection_pool_.GetSender(ConnectionPool::ConnectionType::MESSAGE, client_id,
                                       &conn);
   if (!status.ok()) {
-    // TODO(hme): Keep track of retries,
-    // and only retry on object not local
-    // for now.
-    SchedulePull(object_id, config_.pull_timeout_ms);
+    RetryPullAfterTimeout(object_id);
     return status;
   }
   if (conn == nullptr) {
@@ -175,7 +183,9 @@ ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
           RAY_CHECK_OK(PullSendRequest(object_id, async_conn));
         },
         [this, object_id](const Status &status) {
-          SchedulePull(object_id, config_.pull_timeout_ms);
+          RAY_CHECK_OK(
+              connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
+          RetryPullAfterTimeout(object_id);
         });
   } else {
     RAY_CHECK_OK(PullSendRequest(object_id, conn));
@@ -193,6 +203,7 @@ ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
                                   fbb.GetSize(), fbb.GetBufferPointer()));
   RAY_CHECK_OK(
       connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
+  RetryPullAfterTimeout(object_id);
   return ray::Status::OK();
 }
 
@@ -398,6 +409,11 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn
   uint64_t chunk_index = object_header->chunk_index();
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
+  if (!ObjectLocal(object_id)){
+    // If the object is already local, don't mark it as in transit.
+    // Object create will fail, and the object will not be read into the store.
+    AddIncomingTransfer(object_id, conn->GetClientID());
+  }
   receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn]() {
     ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
                          chunk_index, conn);

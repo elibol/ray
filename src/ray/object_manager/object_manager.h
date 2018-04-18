@@ -39,13 +39,16 @@ struct ObjectManagerConfig {
   int max_receives;
   /// Object chunk size, in bytes
   uint64_t object_chunk_size;
-  // TODO(hme): Implement num retries (to avoid infinite retries).
+  /// The name of the plasma store socket to which plasma clients connect.
   std::string store_socket_name;
 };
 
 // TODO(hme): Add success/failure callbacks for push and pull.
 class ObjectManager {
  public:
+
+  using ObjectTransferCallback = std::function<void(const ObjectID &)>;
+
   /// Implicitly instantiates Ray implementation of ObjectDirectory.
   ///
   /// \param main_service The main asio io_service.
@@ -90,20 +93,32 @@ class ObjectManager {
   /// \return Status of whether the push request successfully initiated.
   ray::Status Push(const ObjectID &object_id, const ClientID &client_id);
 
-  /// Pull an object from ClientID. Returns UniqueID asociated with
-  /// an invocation of this method.
+  /// Identify clients that contain the given object, and request
+  /// the object from each one up to num_tries number of times.
+  /// If the object does not appear locally after a certain period of time,
+  /// invoke the failure callback. If the object appears locally, invoke the
+  /// success callback. This method does nothing if an attempt to pull the given
+  /// object is already in progress.
   ///
   /// \param object_id The object's object id.
-  /// \return Status of whether the pull request successfully initiated.
-  ray::Status Pull(const ObjectID &object_id);
+  /// \return Status of whether the pull request successfully initiated. If an attempt
+  /// to pull the given object is already in progress, this method will return status ok.
+  ray::Status Pull(const ObjectID &object_id,
+                   uint64_t num_attempts,
+                   const ObjectTransferCallback &success,
+                   const ObjectTransferCallback &failure);
 
   /// Discover ClientID via ObjectDirectory, then pull object
   /// from ClientID associated with ObjectID.
   ///
   /// \param object_id The object's object id.
-  /// \param client_id The remote node's client id.
+  /// \param client_ids A vector of client_ids to try.
   /// \return Status of whether the pull request successfully initiated.
-  ray::Status Pull(const ObjectID &object_id, const ClientID &client_id);
+  ray::Status Pull(const ObjectID &object_id,
+                   const ClientID &client_id,
+                   uint64_t num_attempts,
+                   const ObjectTransferCallback &success,
+                   const ObjectTransferCallback &failure);
 
   /// Add a connection to a remote object manager.
   /// This is invoked by an external server.
@@ -146,6 +161,9 @@ class ObjectManager {
                    int num_ready_objects, const WaitCallback &callback);
 
  private:
+
+  const uint64_t default_num_pull_attempts_ = 3;
+
   ClientID client_id_;
   const ObjectManagerConfig config_;
   std::unique_ptr<ObjectDirectoryInterface> object_directory_;
@@ -178,13 +196,256 @@ class ObjectManager {
   /// Connection pool for reusing outgoing connections to remote object managers.
   ConnectionPool connection_pool_;
 
-  /// Timeout for failed pull requests.
-  std::unordered_map<ObjectID, std::shared_ptr<boost::asio::deadline_timer>,
-                     UniqueIDHasher>
-      pull_requests_;
-
   /// Cache of locally available objects.
   std::unordered_map<ObjectID, ObjectInfoT, UniqueIDHasher> local_objects_;
+
+  enum class ObjectTransferState : int {
+    IDLE=0,
+    PULL_REQUEST,
+    PULL_RECEIVE,
+    FAILED
+  };
+
+  struct ObjectTransferClientInfo {
+    ObjectTransferClientInfo() = default;
+    ObjectTransferClientInfo(uint64_t max_attemps,
+                             const ObjectTransferCallback &success,
+                             const ObjectTransferCallback &failure)
+        : max_attempts(max_attempts), success(success), fail(failure){}
+    ObjectTransferState state = ObjectTransferState::IDLE;
+    uint64_t num_attempts = 0;
+    uint64_t max_attempts;
+    const ObjectTransferCallback &success;
+    const ObjectTransferCallback &fail;
+  };
+
+  struct ObjectTransfer {
+    ObjectTransfer() = default;
+    ObjectTransfer(asio::io_service service,
+                   uint64_t timout_ms,
+                   uint64_t num_reties,
+                   const ObjectTransferCallback &success,
+                   const ObjectTransferCallback &failure) :
+        timer(service, boost::posix_time::milliseconds(timout_ms)), default_num_attempts(num_reties), success(success), fail(failure){};
+    boost::asio::deadline_timer timer;
+    uint64_t client_cursor = 0;
+    uint64_t num_get_location_attempts = 0;
+    uint64_t default_num_attempts;
+    std::vector<ClientID> client_ids;
+    std::unordered_map<ClientID, ObjectTransferClientInfo, UniqueID> client_info;
+    const ObjectTransferCallback &success;
+    const ObjectTransferCallback &fail;
+  };
+
+  std::unordered_map<ObjectID, ObjectTransfer, UniqueID> object_transfers_;
+
+  bool ObjectInTransit(const ObjectID &object_id){
+    return object_transfers_.count(object_id) > 0;
+  }
+
+  bool ObjectLocal(const ObjectID &object_id){
+    return local_objects_.count(object_id) > 0;
+  }
+
+  void CreateObjectTransfer(const ObjectID &object_id, uint64_t num_attempts,
+                            asio::io_service service,
+                            uint64_t timout_ms,
+                            const ObjectTransferCallback &success,
+                            const ObjectTransferCallback &failure){
+    object_transfers_.emplace(object_id, std::move(ObjectTransfer(service,
+                                                                  timout_ms,
+        num_attempts,
+        success,
+        failure
+    )));
+  }
+
+  /// This is the only method that can remove an object transfer.
+  /// This is called when we receive notification from the object store that the object
+  /// has been added.
+  void RemoveObjectTransfer(const ObjectID &object_id){
+    object_transfers_[object_id].timer.cancel();
+    object_transfers_.erase(object_id);
+  }
+
+  uint64_t DefaultNumRetries(const ObjectID &object_id){
+    return object_transfers_[object_id].default_num_attempts;
+  }
+
+  void AddObjectTransferClients(const ObjectID &object_id,
+                                const std::vector<ClientID> &new_client_ids,
+                                uint64_t num_attempts) {
+    for (const ClientID &client_id : new_client_ids) {
+      AddObjectTransferClient(object_id, client_id, num_attempts, nullptr, nullptr);
+    }
+  }
+
+  void AddObjectTransferClient(const ObjectID &object_id,
+                               const ClientID &client_id,
+                               uint64_t num_attempts,
+                               const ObjectTransferCallback &success,
+                               const ObjectTransferCallback &failure){
+    if (client_id == client_id_){
+      // Don't pull from self.
+      return;
+    }
+    ObjectTransfer &object_transfer = object_transfers_[object_id];
+    if (object_transfer.client_info.count(client_id) == 0){
+      object_transfer.client_ids.push_back(client_id);
+      object_transfer.client_info.emplace(client_id, std::move(ObjectTransferClientInfo(num_attempts, success, failure)));
+    } else {
+      if (object_transfer.client_info[client_id].state == ObjectTransferState::FAILED){
+        // Retry this client if it has been marked failed.
+        object_transfer.client_info[client_id].state = ObjectTransferState::IDLE;
+        object_transfer.client_info[client_id].num_attempts = 0;
+        // Move it to the end of the vector.
+        std::vector<ClientID> v = object_transfer.client_ids;
+        v.erase(std::remove(v.begin(), v.end(), client_id), v.end());
+        v.push_back(client_id);
+      }
+    }
+  }
+
+  /// This is invoked when an object is being received from a remote client.
+  /// This is the only other method other than Pull that
+  /// creates an object transfer.
+  void AddIncomingTransfer(const ObjectID &object_id,
+                           const ClientID &client_id){
+    if(ObjectLocal(object_id)) {
+      // Do nothing.
+      return;
+    }
+    if (ObjectInTransit(object_id)){
+      // Pull is already being processed, either from this method or a Pull invocation.
+      AddObjectTransferClient(object_id, client_id, DefaultNumRetries(object_id),
+                              nullptr,
+                              nullptr);
+    } else {
+      // Object is not local and no pull request has been created.
+      CreateObjectTransfer(object_id, default_num_pull_attempts_, *main_service_,
+                           config_.pull_timeout_ms, nullptr, nullptr);
+      AddObjectTransferClient(object_id, client_id, default_num_pull_attempts_, nullptr,
+                              nullptr);
+
+    }
+    ObjectTransfer &object_transfer = object_transfers_[object_id];
+    object_transfer.client_info[client_id].state = ObjectTransferState::PULL_RECEIVE;
+  }
+
+  const ClientID &GetNextClient(const ObjectID &object_id){
+    // Iterate over every client round robin, and mark each one as failed only
+    // after trying the client max_attempts number of times.
+    // Return nil ClientID once all clients have been tried max_attempts number of times..
+    ObjectTransfer &object_transfer = object_transfers_[object_id];
+    int num_failed = 0;
+    while(num_failed < object_transfer.client_ids.size()) {
+      const ClientID
+          &client_id = object_transfer.client_ids[object_transfer.client_cursor];
+      ObjectTransferClientInfo &client_info = object_transfer.client_info[client_id];
+      switch (client_info.state) {
+        case ObjectTransferState::IDLE:
+        // We can try this client.
+        {
+          client_info.state = ObjectTransferState::PULL_REQUEST;
+          return client_id;
+        }
+        case ObjectTransferState::PULL_REQUEST:
+        // A pull request for this client has already gone out.
+        // Mark it as failed or idle, and cycle through remaining clients.
+        case ObjectTransferState::PULL_RECEIVE:
+        // A pull is currently being received from this client, and we've timed out.
+        // Handle the same way we handle PULL_REQUEST.
+        {
+          client_info.num_attempts += 1;
+          if (client_info.num_attempts >= client_info.max_attempts){
+            client_info.state = ObjectTransferState::FAILED;
+          } else {
+            client_info.state = ObjectTransferState::IDLE;
+          }
+          object_transfer.client_cursor = (object_transfer.client_cursor + 1) % object_transfer.client_ids.size();
+          break;
+        }
+        case ObjectTransferState::FAILED:
+        // This is a failed transfer, so increment num_failed.
+        {
+          num_failed += 1;
+        }
+      }
+    }
+    // If all clients fail, return nil. The Pull attempt is a failure.
+    return ClientID::nil();
+  }
+
+  /// Wait pull_timeout_ms milliseconds before attempting to obtain locations for
+  /// object_id.
+  /// This is invoked when GetLocationsFailed is invoked.
+  void RetryGetLocations(const ObjectID &object_id){
+    ObjectTransfer &object_transfer = object_transfers_[object_id];
+    object_transfer.num_get_location_attempts += 1;
+    if (object_transfer.num_get_location_attempts < object_transfer.default_num_attempts) {
+      object_transfer.timer.async_wait(
+          [this, object_id](const boost::system::error_code &error_code) {
+            if (error_code.value() == 0) {
+              RAY_CHECK_OK(PullGetLocations(object_id));
+            }
+          });
+    } else {
+      PullFailed(object_id);
+    }
+  }
+
+  /// Wait config_.pull_timeout_ms milliseconds before trying to a pull object_id
+  /// from another client, or retrying known clients.
+  /// This is invoked if a pull fails at any point OR when a pull request is sent.
+  void RetryPullAfterTimeout(const ObjectID &object_id){
+    object_transfers_[object_id].timer.async_wait(
+        [this, object_id](const boost::system::error_code &error_code) {
+          if (error_code.value() == 0){
+            TryPull(object_id);
+          }
+        });
+  }
+
+  void TryPull(const ObjectID &object_id){
+    const ClientID &client_id = GetNextClient(object_id);
+    if (client_id.is_nil()){
+      // The pull attempt has failed.
+      PullFailed(object_id);
+    } else {
+      // Establish a connection with the remote node in order to submit the pull request.
+      PullEstablishConnection(object_id, client_id);
+    }
+  }
+
+  void PullFailed(const ObjectID &object_id){
+    if (object_transfers_[object_id].fail != nullptr) {
+      object_transfers_[object_id].fail(object_id);
+    }
+    for (auto id_info : object_transfers_[object_id].client_info){
+      const ObjectTransferClientInfo &client_info = id_info.second;
+      if (client_info.fail != nullptr) {
+        client_info.fail(object_id);
+      }
+    }
+    // invoke any pull requests for
+    RemoveObjectTransfer(object_id);
+  }
+
+  void PullSucceeded(const ObjectID &object_id){
+    // Did we ever initiate a pull request for this object?
+    if(object_transfers_.count(object_id) > 0){
+      if (object_transfers_[object_id].success != nullptr){
+        object_transfers_[object_id].success(object_id);
+      }
+      for (auto id_info : object_transfers_[object_id].client_info){
+        const ObjectTransferClientInfo &client_info = id_info.second;
+        if (client_info.success != nullptr) {
+          client_info.success(object_id);
+        }
+      }
+      RemoveObjectTransfer(object_id);
+    }
+  }
 
   /// Handle starting, running, and stopping asio io_service.
   void StartIOService();
@@ -197,11 +458,6 @@ class ObjectManager {
 
   /// Register object remove with directory.
   void NotifyDirectoryObjectDeleted(const ObjectID &object_id);
-
-  /// Wait wait_ms milliseconds before triggering a pull request for object_id.
-  /// This is invoked when a pull fails. Only point of failure currently considered
-  /// is GetLocationsFailed.
-  void SchedulePull(const ObjectID &object_id, int wait_ms);
 
   /// Part of an asynchronous sequence of Pull methods.
   /// Gets the location of an object before invoking PullEstablishConnection.
