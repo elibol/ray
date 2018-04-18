@@ -180,7 +180,7 @@ class ObjectManagerBenchmarkTool {
           }
           if (object_info.data_size == 1){
             // This is an init object.
-            RAY_LOG(INFO) << "init received " << object_id;
+            RAY_LOG(DEBUG) << "init received " << object_id;
             remote_trial_ready = true;
             if (remote_trial_ready && local_trial_ready){
               // We're waiting on remote end, and the remote end
@@ -193,7 +193,7 @@ class ObjectManagerBenchmarkTool {
 
           // Record stats.
           v1.push_back(object_id);
-          RAY_LOG(INFO) << "processed " << object_id;
+          RAY_LOG(DEBUG) << "processed " << object_id;
           receive_times.push_back(current_time_ms());
 
           if ((int)v1.size() == num_objects) {
@@ -229,15 +229,16 @@ class ObjectManagerBenchmarkTool {
   void SendInit(ClientID remote_client_id){
     // send a small object to remote om to indicate that this om is
     // ready to begin the next trial.
+    usleep(10*1000);
     ObjectID oid = test::WriteDataToClient(client1, 1, 0);
     init_objects.insert(oid);
     Status push_status = server1->object_manager_.Push(oid, remote_client_id);
-    RAY_LOG(INFO) << "init sent " << oid;
+    RAY_LOG(DEBUG) << "init sent " << oid;
   }
 
   void BeginTrial(ClientID remote_client_id){
-    // usleep(100*1000);
-    RAY_LOG(INFO) << "begin trial " << trial_count << " " << current_time_ms();
+    usleep(10*1000);
+    RAY_LOG(DEBUG) << "BeginTrial " << trial_count;
     local_trial_ready = false;
     remote_trial_ready = false;
     start_time = current_time_ms();
