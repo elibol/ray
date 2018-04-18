@@ -21,9 +21,6 @@ class StressTestObjectManagerBase : public ::testing::Test {
   void SetUp() {
     test::flushall_redis();
 
-    object_manager_service_1.reset(new boost::asio::io_service());
-    object_manager_service_2.reset(new boost::asio::io_service());
-
     // start store
     store_id_1 = StartStore(UniqueID::from_random().hex(), store_executable, "1");
     store_id_2 = StartStore(UniqueID::from_random().hex(), store_executable, "1");
@@ -41,11 +38,7 @@ class StressTestObjectManagerBase : public ::testing::Test {
     om_config_1.max_sends = max_sends;
     om_config_1.max_receives = max_receives;
     om_config_1.object_chunk_size = object_chunk_size;
-    server1.reset(new test::MockServer(main_service,
-                                       "127.0.0.1",
-                                       "127.0.0.1",
-                                       6379,
-                                       std::move(object_manager_service_1),
+    server1.reset(new test::MockServer(main_service, "127.0.0.1", "127.0.0.1", 6379,
                                        om_config_1, gcs_client_1));
 
     // start second server
@@ -56,11 +49,7 @@ class StressTestObjectManagerBase : public ::testing::Test {
     om_config_2.max_sends = max_sends;
     om_config_2.max_receives = max_receives;
     om_config_2.object_chunk_size = object_chunk_size;
-    server2.reset(new test::MockServer(main_service,
-                                       "127.0.0.1",
-                                       "127.0.0.1",
-                                       6379,
-                                       std::move(object_manager_service_2),
+    server2.reset(new test::MockServer(main_service, "127.0.0.1", "127.0.0.1", 6379,
                                        om_config_2, gcs_client_2));
 
     // connect to stores.
@@ -87,8 +76,6 @@ class StressTestObjectManagerBase : public ::testing::Test {
  protected:
   std::thread p;
   boost::asio::io_service main_service;
-  std::unique_ptr<boost::asio::io_service> object_manager_service_1;
-  std::unique_ptr<boost::asio::io_service> object_manager_service_2;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_1;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_2;
   std::unique_ptr<test::MockServer> server1;
@@ -271,9 +258,11 @@ class StressTestObjectManager : public StressTestObjectManagerBase {
       std::mt19937 gen(rd());
       std::uniform_int_distribution<> dis(1, 50);
       for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = test::WriteDataToClient(client1, data_size + dis(gen), dis(gen), true);
+        ObjectID oid1 =
+            test::WriteDataToClient(client1, data_size + dis(gen), dis(gen), true);
         status = server2->object_manager_.Pull(oid1);
-        ObjectID oid2 = test::WriteDataToClient(client2, data_size + dis(gen), dis(gen), true);
+        ObjectID oid2 =
+            test::WriteDataToClient(client2, data_size + dis(gen), dis(gen), true);
         status = server1->object_manager_.Pull(oid2);
       }
     } break;
@@ -312,8 +301,8 @@ TEST_F(StressTestObjectManager, StartStressTestObjectManager) {
   main_service.run();
 }
 
-} // namespace test
-} // namespace object_manager
+}  // namespace test
+}  // namespace object_manager
 }  // namespace ray
 
 int main(int argc, char **argv) {

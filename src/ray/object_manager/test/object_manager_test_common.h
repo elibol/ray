@@ -30,9 +30,10 @@ namespace ray {
 namespace object_manager {
 namespace test {
 
-std::pair<double_t,double_t> mean_std(const std::vector<double_t> &in_v, uint64_t skip_n){
+std::pair<double_t, double_t> mean_std(const std::vector<double_t> &in_v,
+                                       uint64_t skip_n) {
   std::vector<double_t> v;
-  for (;skip_n<in_v.size();++skip_n) {
+  for (; skip_n < in_v.size(); ++skip_n) {
     v.push_back(in_v[skip_n]);
   }
   RAY_LOG(DEBUG) << "mean_std with n=" << v.size();
@@ -40,7 +41,7 @@ std::pair<double_t,double_t> mean_std(const std::vector<double_t> &in_v, uint64_
   double mean = sum / v.size();
   double sq_sum = std::inner_product(v.begin(), v.end(), v.begin(), 0.0);
   double stdev = std::sqrt(sq_sum / v.size() - mean * mean);
-  return std::pair<double_t,double_t>(mean, stdev);
+  return std::pair<double_t, double_t>(mean, stdev);
 }
 
 int64_t current_time_ms() {
@@ -56,13 +57,14 @@ static inline void flushall_redis(void) {
   redisFree(context);
 }
 
-std::string StartStore(const std::string &id, const std::string &store_executable, std::string gigabytes_memory) {
+std::string StartStore(const std::string &id, const std::string &store_executable,
+                       std::string gigabytes_memory) {
   std::string store_id = "/tmp/store";
   store_id = store_id + id;
   std::string store_pid = store_id + ".pid";
-  std::string plasma_command = store_executable + " -m " + gigabytes_memory + "000000000 -s " + store_id +
-      " 1> /dev/null 2> /dev/null &" + " echo $! > " +
-      store_pid;
+  std::string plasma_command = store_executable + " -m " + gigabytes_memory +
+                               "000000000 -s " + store_id +
+                               " 1> /dev/null 2> /dev/null &" + " echo $! > " + store_pid;
   RAY_LOG(DEBUG) << plasma_command;
   RAY_CHECK(!system(plasma_command.c_str()));
   sleep(1);
@@ -75,26 +77,25 @@ void StopStore(std::string store_id) {
   RAY_CHECK(!system(kill_1.c_str()));
 }
 
-ObjectID WriteDataToClient(plasma::PlasmaClient &client, uint64_t data_size, uint64_t metadata_size=1, bool randomize_data=false) {
+ObjectID WriteDataToClient(plasma::PlasmaClient &client, uint64_t data_size,
+                           uint64_t metadata_size = 1, bool randomize_data = false) {
   ObjectID object_id = ObjectID::from_random();
   RAY_LOG(DEBUG) << "ObjectID Created: " << object_id;
   uint8_t metadata[metadata_size];
   // Write random metadata.
   if (randomize_data) {
     srand(time(NULL));
-    for (uint64_t i = 0; i < metadata_size; i++)
-      metadata[i] = (uint8_t) (rand() % 256);
+    for (uint64_t i = 0; i < metadata_size; i++) metadata[i] = (uint8_t)(rand() % 256);
   }
   RAY_CHECK(sizeof(metadata) == metadata_size);
   std::shared_ptr<Buffer> data;
-  ARROW_CHECK_OK(client.Create(object_id.to_plasma_id(), data_size, metadata,
-                               metadata_size, &data));
+  ARROW_CHECK_OK(
+      client.Create(object_id.to_plasma_id(), data_size, metadata, metadata_size, &data));
   // Write random data to buffer.
   uint8_t *buffer = data->mutable_data();
   if (randomize_data) {
     srand(time(NULL));
-    for (uint64_t i = 0; i < data_size; i++)
-      buffer[i] = (uint8_t) (rand() % 256);
+    for (uint64_t i = 0; i < data_size; i++) buffer[i] = (uint8_t)(rand() % 256);
   }
   ARROW_CHECK_OK(client.Seal(object_id.to_plasma_id()));
   return object_id;
@@ -114,7 +115,8 @@ static unsigned char *GetDigest(plasma::PlasmaClient &client, ObjectID &object_i
   return digest_1;
 }
 
-void CompareObjects(plasma::PlasmaClient &client1, plasma::PlasmaClient &client2, ObjectID &object_id_1, ObjectID &object_id_2) {
+void CompareObjects(plasma::PlasmaClient &client1, plasma::PlasmaClient &client2,
+                    ObjectID &object_id_1, ObjectID &object_id_2) {
   plasma::ObjectBuffer object_buffer_1 = GetObject(client1, object_id_1);
   plasma::ObjectBuffer object_buffer_2 = GetObject(client2, object_id_2);
   uint8_t *data_1 = const_cast<uint8_t *>(object_buffer_1.data->data());
@@ -128,7 +130,8 @@ void CompareObjects(plasma::PlasmaClient &client1, plasma::PlasmaClient &client2
   }
 }
 
-void CompareHashes(plasma::PlasmaClient &client1, plasma::PlasmaClient &client2, ObjectID &object_id_1, ObjectID &object_id_2) {
+void CompareHashes(plasma::PlasmaClient &client1, plasma::PlasmaClient &client2,
+                   ObjectID &object_id_1, ObjectID &object_id_2) {
   const int64_t size = sizeof(uint64_t);
   static unsigned char *digest_1 = GetDigest(client1, object_id_1);
   static unsigned char *digest_2 = GetDigest(client2, object_id_2);
@@ -139,21 +142,16 @@ void CompareHashes(plasma::PlasmaClient &client1, plasma::PlasmaClient &client2,
 
 class MockServer {
  public:
-  MockServer(boost::asio::io_service &main_service,
-             const std::string &node_ip_address,
-             const std::string &redis_address,
-             int redis_port,
-             std::unique_ptr<boost::asio::io_service> object_manager_service,
+  MockServer(boost::asio::io_service &main_service, const std::string &node_ip_address,
+             const std::string &redis_address, int redis_port,
              const ObjectManagerConfig &object_manager_config,
              std::shared_ptr<gcs::AsyncGcsClient> gcs_client)
       : object_manager_acceptor_(
-      *object_manager_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
+            main_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0)),
         gcs_client_(gcs_client),
         main_service_(main_service),
-        object_manager_service_(object_manager_service.get()),
-        object_manager_socket_(*object_manager_service),
-        object_manager_(main_service, std::move(object_manager_service),
-                        object_manager_config, gcs_client) {
+        object_manager_socket_(main_service),
+        object_manager_(main_service, object_manager_config, gcs_client) {
     RAY_CHECK_OK(RegisterGcs(node_ip_address, redis_address, redis_port, main_service));
     // Start listening for clients.
     DoAcceptObjectManager();
@@ -180,9 +178,8 @@ class MockServer {
                    << " port " << client_info.node_manager_port;
     RAY_RETURN_NOT_OK(gcs_client_->client_table().Connect(client_info));
 
-    auto node_manager_client_added = [this](gcs::AsyncGcsClient *client, const UniqueID &id,
-                                            const ClientTableDataT &data) {
-    };
+    auto node_manager_client_added = [this](
+        gcs::AsyncGcsClient *client, const UniqueID &id, const ClientTableDataT &data) {};
     gcs_client_->client_table().RegisterClientAddedCallback(node_manager_client_added);
     return Status::OK();
   }
@@ -216,13 +213,12 @@ class MockServer {
   boost::asio::ip::tcp::acceptor object_manager_acceptor_;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_;
   boost::asio::io_service &main_service_;
-  boost::asio::io_service *object_manager_service_;
   boost::asio::ip::tcp::socket object_manager_socket_;
   ObjectManager object_manager_;
 };
 
-} // namespace test
-} // namespace object_manager
-} // namespace ray
+}  // namespace test
+}  // namespace object_manager
+}  // namespace ray
 
-#endif //RAY_OBJECT_MANAGER_OBJECT_MANAGER_TEST_COMMON_H
+#endif  // RAY_OBJECT_MANAGER_OBJECT_MANAGER_TEST_COMMON_H

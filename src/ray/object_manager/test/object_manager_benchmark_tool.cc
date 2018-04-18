@@ -26,7 +26,6 @@ class ObjectManagerBenchmarkTool {
                              uint64_t object_chunk_size,
                              const std::string &store_gigabytes_memory) {
 
-    object_manager_service_1.reset(new boost::asio::io_service());
     work_.reset(new boost::asio::io_service::work(main_service));
 
     // start store
@@ -43,7 +42,6 @@ class ObjectManagerBenchmarkTool {
                                      node_ip_address,
                                      redis_address,
                                      redis_port,
-                                     std::move(object_manager_service_1),
                                      om_config_1,
                                      gcs_client_1));
 
@@ -173,7 +171,7 @@ class ObjectManagerBenchmarkTool {
         [this, remote_client_id, object_size, num_objects, num_trials](const ObjectInfoT &object_info) {
           ObjectID object_id = ObjectID::from_binary(object_info.object_id);
           if (init_objects.count(object_id) > 0){
-            // Ignore the init object sent to the remote manager.
+            // Ignore init objects sent to the remote manager.
             return;
           }
           if (ignore_send_ids.count(object_id) != 0) {
@@ -238,6 +236,7 @@ class ObjectManagerBenchmarkTool {
   }
 
   void BeginTrial(ClientID remote_client_id){
+    // usleep(100*1000);
     RAY_LOG(INFO) << "begin trial " << trial_count << " " << current_time_ms();
     local_trial_ready = false;
     remote_trial_ready = false;
@@ -298,7 +297,6 @@ class ObjectManagerBenchmarkTool {
   std::unordered_set<ObjectID, UniqueIDHasher> ignore_send_ids;
 
   std::thread p;
-  std::unique_ptr<boost::asio::io_service> object_manager_service_1;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_1;
   std::unique_ptr<test::MockServer> server1;
 
