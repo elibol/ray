@@ -427,7 +427,11 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
       // TODO(hme): This chunk failed, so create a pull request for this chunk.
     }
   } else {
-    RAY_LOG(ERROR) << "Buffer Create Failed: " << chunk_status.second.message();
+    if (chunk_index == 0){
+      RAY_LOG(ERROR) << "Buffer Create Failed: "
+                     << object_id << " "
+                     << chunk_status.second.message();
+    }
     // Read object into empty buffer.
     uint64_t buffer_length = buffer_pool_.GetBufferLength(chunk_index, data_size);
     std::vector<uint8_t> mutable_vec;

@@ -30,7 +30,7 @@ add_library(rayletlib raylet.cc ${NODE_MANAGER_FBS_OUTPUT_FILES})
 target_link_libraries(rayletlib ray_static ${Boost_SYSTEM_LIBRARY})
 
 add_executable(raylet main.cc)
-target_link_libraries(raylet rayletlib ${Boost_SYSTEM_LIBRARY} pthread)
+target_link_libraries(raylet rayletlib ${Boost_SYSTEM_LIBRARY} pthread -lprofiler)
 
 add_executable(raylet_monitor monitor_main.cc)
 target_link_libraries(raylet_monitor rayletlib ${Boost_SYSTEM_LIBRARY} pthread)
