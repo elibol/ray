@@ -65,6 +65,8 @@ class Raylet {
 
   friend class TestObjectManagerIntegration;
 
+  boost::asio::io_service &main_service_;
+
   /// A client connection to the GCS.
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_;
   /// Manages client requests for object transfers and availability.

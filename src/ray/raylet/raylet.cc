@@ -16,7 +16,8 @@ Raylet::Raylet(boost::asio::io_service &main_service, const std::string &socket_
                int redis_port, const NodeManagerConfig &node_manager_config,
                const ObjectManagerConfig &object_manager_config,
                std::shared_ptr<gcs::AsyncGcsClient> gcs_client)
-    : gcs_client_(gcs_client),
+    : main_service_(main_service),
+      gcs_client_(gcs_client),
       object_manager_(main_service, object_manager_config, gcs_client),
       node_manager_(main_service, node_manager_config, object_manager_, gcs_client_),
       socket_name_(socket_name),
@@ -104,6 +105,7 @@ void Raylet::HandleAcceptNodeManager(const boost::system::error_code &error) {
 }
 
 void Raylet::DoAcceptObjectManager() {
+  object_manager_socket_ = boost::asio::ip::tcp::socket(main_service_);
   object_manager_acceptor_.async_accept(
       object_manager_socket_, boost::bind(&Raylet::HandleAcceptObjectManager, this,
                                           boost::asio::placeholders::error));

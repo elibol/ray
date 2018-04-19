@@ -92,6 +92,14 @@ class ClientConnection : public ServerConnection<T>,
   /// \param client_id The ClientID of the remote client.
   void SetClientID(const ClientID &client_id);
 
+  bool is_transfer_ = false;
+  void SetIsTransfer(bool is_transfer){
+    is_transfer_= is_transfer;
+  }
+  bool GetIsTransfer(){
+    return is_transfer_;
+  }
+
   /// Listen for and process messages from the client connection. Once a
   /// message has been fully received, the client manager's
   /// ProcessClientMessage handler will be called.

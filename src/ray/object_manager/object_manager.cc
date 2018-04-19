@@ -352,7 +352,7 @@ void ObjectManager::ProcessClientMessage(std::shared_ptr<TcpClientConnection> co
     DisconnectClient(conn, message);
     break;
   }
-  default: { RAY_LOG(FATAL) << "invalid request " << message_type; }
+  default: { RAY_LOG(FATAL) << "invalid request " << message_type << " " << conn->GetIsTransfer(); }
   }
 }
 
@@ -364,6 +364,7 @@ void ObjectManager::ConnectClient(std::shared_ptr<TcpClientConnection> &conn,
   ClientID client_id = ObjectID::from_binary(info->client_id()->str());
   bool is_transfer = info->is_transfer();
   conn->SetClientID(client_id);
+  conn->SetIsTransfer(is_transfer);
   if (is_transfer) {
     connection_pool_.RegisterReceiver(ConnectionPool::ConnectionType::TRANSFER, client_id,
                                       conn);
