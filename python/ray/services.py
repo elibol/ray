@@ -967,7 +967,11 @@ def start_raylet(redis_address,
         start_worker_command,
         resource_argument,
     ]
-    pid = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file)
+    modified_env = os.environ.copy()
+    modified_env["LD_PRELOAD"] = "/usr/lib/libprofiler.so"
+    modified_env["CPUPROFILE"] = "/tmp/pprof.out"
+    pid = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file, env=modified_env)
+    # pid = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file)
 
     if cleanup:
         all_processes[PROCESS_TYPE_RAYLET].append(pid)
