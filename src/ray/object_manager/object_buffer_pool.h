@@ -125,6 +125,9 @@ class ObjectBufferPool {
   void SealChunk(const ObjectID &object_id, uint64_t chunk_index);
 
  private:
+
+  friend class ObjectBufferPoolTests;
+
   /// Abort the create operation associated with an object. This destroys the buffer
   /// state, including create operations in progress for all chunks of the object.
   void AbortCreate(const ObjectID &object_id);
@@ -177,7 +180,7 @@ class ObjectBufferPool {
   /// get_buffer_state_, create_buffer_state_, and store_client_.
   std::mutex pool_mutex_;
   /// Determines the maximum chunk size to be transferred by a single thread.
-  const uint64_t chunk_size_;
+  uint64_t chunk_size_;
   /// The state of a buffer that's currently being used.
   std::unordered_map<ray::ObjectID, GetBufferState, ray::UniqueIDHasher>
       get_buffer_state_;

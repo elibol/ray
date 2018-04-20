@@ -429,6 +429,9 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     std::vector<boost::asio::mutable_buffer> buffer;
     buffer.push_back(asio::buffer(chunk_info.data, chunk_info.buffer_length));
     boost::system::error_code ec;
+    log_lock_.lock();
+    RAY_LOG(INFO) << "read ok " << object_id << " " << chunk_index << " " << chunk_info.buffer_length;
+    log_lock_.unlock();
     conn->ReadBuffer(buffer, ec);
     if (ec.value() == 0) {
       buffer_pool_.SealChunk(object_id, chunk_index);
@@ -438,7 +441,7 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     }
   } else {
     if (chunk_index == 0){
-      RAY_LOG(ERROR) << "Buffer Create Failed: "
+      RAY_LOG(DEBUG) << "Buffer Create Failed: "
                      << object_id << " "
                      << chunk_status.second.message();
     }
@@ -450,7 +453,7 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     buffer.push_back(asio::buffer(mutable_vec, buffer_length));
     boost::system::error_code ec;
     log_lock_.lock();
-    RAY_LOG(INFO) << "read " << object_id << " " << chunk_index << " " << buffer_length;
+    RAY_LOG(INFO) << "read error " << object_id << " " << chunk_index << " " << buffer_length;
     log_lock_.unlock();
     conn->ReadBuffer(buffer, ec);
     if (ec.value() != 0) {

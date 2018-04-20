@@ -85,8 +85,9 @@ std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> ObjectBufferPool::Cr
     const ObjectID &object_id, uint64_t data_size, uint64_t metadata_size,
     uint64_t chunk_index) {
   std::lock_guard<std::mutex> lock(pool_mutex_);
-  RAY_LOG(DEBUG) << "CreateChunk " << object_id << " " << data_size << " "
-                 << metadata_size;
+  RAY_LOG(DEBUG) << "CreateChunk "
+                << object_id << " "
+                << chunk_index << " ";
   if (create_buffer_state_.count(object_id) == 0) {
     const plasma::ObjectID plasma_id = ObjectID(object_id).to_plasma_id();
     int64_t object_size = data_size - metadata_size;
@@ -149,8 +150,10 @@ void ObjectBufferPool::SealChunk(const ObjectID &object_id, const uint64_t chunk
             CreateChunkState::REFERENCED);
   create_buffer_state_[object_id].chunk_state[chunk_index] = CreateChunkState::SEALED;
   create_buffer_state_[object_id].num_seals_remaining--;
-  RAY_LOG(DEBUG) << "SealChunk" << object_id << " "
-                 << create_buffer_state_[object_id].num_seals_remaining;
+  RAY_LOG(DEBUG) << "SealChunk "
+                << object_id << " "
+                << chunk_index <<  " "
+                << create_buffer_state_[object_id].num_seals_remaining;
   if (create_buffer_state_[object_id].num_seals_remaining == 0) {
     const plasma::ObjectID plasma_id = ObjectID(object_id).to_plasma_id();
     ARROW_CHECK_OK(store_client_.Seal(plasma_id));

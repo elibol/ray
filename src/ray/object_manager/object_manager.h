@@ -152,7 +152,7 @@ class ObjectManager {
   ObjectStoreNotificationManager store_notification_;
   ObjectBufferPool buffer_pool_;
 
-  std::unique_lock<std::mutex> log_lock_;
+  std::mutex log_lock_;
 
   /// This runs on a thread pool dedicated to sending objects.
   boost::asio::io_service send_service_;
