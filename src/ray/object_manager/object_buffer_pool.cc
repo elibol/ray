@@ -58,8 +58,9 @@ std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> ObjectBufferPool::Ge
         std::piecewise_construct, std::forward_as_tuple(object_id),
         std::forward_as_tuple(BuildChunks(object_id, data, data_size)));
     RAY_CHECK(get_buffer_state_[object_id].chunk_info.size() == num_chunks);
+    get_buffer_state_[object_id].references += num_chunks;
   }
-  get_buffer_state_[object_id].references++;
+  // get_buffer_state_[object_id].references++;
   return std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status>(
       get_buffer_state_[object_id].chunk_info[chunk_index], ray::Status::OK());
 }
