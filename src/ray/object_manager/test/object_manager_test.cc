@@ -260,6 +260,77 @@ TEST_F(TestObjectManagerCommands, StartTestObjectManagerCommands) {
   main_service.run();
 }
 
+class ObjectBufferPoolTests : public ::testing::Test {
+ public:
+
+  ObjectBufferPoolTests()
+      : store_id_(StartStore(GetStoreID())),
+        buffer_pool_(store_id_, 100, PLASMA_DEFAULT_RELEASE_DELAY)
+  {
+    flushall_redis();
+  }
+
+  std::string GetStoreID(){
+    std::string store_id = "/tmp/store";
+    store_id = store_id + UniqueID::from_random().hex();
+    return store_id;
+  }
+
+  std::string StartStore(const std::string &store_id) {
+    std::string store_pid = store_id + ".pid";
+    std::string plasma_command = store_executable + " -m 1000000000 -s " + store_id +
+        " 1> /dev/null 2> /dev/null &" + " echo $! > " +
+        store_pid;
+
+    RAY_LOG(DEBUG) << plasma_command;
+    int ec = system(plasma_command.c_str());
+    RAY_CHECK(ec == 0);
+    sleep(1);
+    return store_id;
+  }
+
+  void StopStore(std::string store_id) {
+    std::string store_pid = store_id + ".pid";
+    std::string kill_1 = "kill -9 `cat " + store_pid + "`";
+    ASSERT_TRUE(!system(kill_1.c_str()));
+  }
+
+  void TearDown() override {
+    RAY_LOG(INFO) << "TearDown";
+    StopStore(store_id_);
+  }
+
+  std::vector<ObjectBufferPool::ChunkInfo> BuildChunks(const ObjectID &object_id, uint8_t *data, uint64_t data_size){
+    return buffer_pool_.BuildChunks(object_id, data, data_size);
+  }
+
+  void SetChunkSize(uint64_t chunk_size){
+    buffer_pool_.chunk_size_ = chunk_size;
+  }
+
+  std::string store_id_;
+  ObjectBufferPool buffer_pool_;
+
+};
+
+TEST_F(ObjectBufferPoolTests, TestBufferLength) {
+  ObjectID object_id = ObjectID::from_random();
+  for(uint64_t data_size = 1; data_size <= 1000; ++data_size){
+    uint8_t data[data_size];
+    for(uint64_t chunk_size = 1; chunk_size <= data_size; ++chunk_size){
+      SetChunkSize(chunk_size);
+      std::vector<ObjectBufferPool::ChunkInfo> chunks = BuildChunks(object_id, data, data_size);
+      RAY_CHECK(buffer_pool_.GetNumChunks(data_size) == chunks.size());
+      for (auto chunk_info : chunks){
+        uint64_t buffer_length = buffer_pool_.GetBufferLength(chunk_info.chunk_index, data_size);
+        RAY_CHECK(chunk_info.buffer_length == buffer_length);
+        ASSERT_EQ(buffer_length, chunk_info.buffer_length);
+        // RAY_LOG(INFO) << buffer_length << " " << chunk_info.buffer_length;
+      }
+    }
+  }
+}
+
 }  // namespace ray
 
 int main(int argc, char **argv) {

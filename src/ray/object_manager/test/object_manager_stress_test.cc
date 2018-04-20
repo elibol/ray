@@ -95,7 +95,7 @@ class TestObjectManagerBase : public ::testing::Test {
     std::string store_id = "/tmp/store";
     store_id = store_id + id;
     std::string store_pid = store_id + ".pid";
-    std::string plasma_command = store_executable + " -m 1000000000 -s " + store_id +
+    std::string plasma_command = store_executable + " -m 4000000000 -s " + store_id +
                                  " 1> /dev/null 2> /dev/null &" + " echo $! > " +
                                  store_pid;
 
@@ -123,7 +123,7 @@ class TestObjectManagerBase : public ::testing::Test {
     uint pull_timeout_ms = 1;
     int max_sends = 2;
     int max_receives = 2;
-    uint64_t object_chunk_size = static_cast<uint64_t>(std::pow(10, 3));
+    uint64_t object_chunk_size = static_cast<uint64_t>(std::pow(10, 5));
 
     // start first server
     gcs_client_1 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
@@ -205,19 +205,22 @@ class StressTestObjectManager : public TestObjectManagerBase {
     PULL_B_A,
     BIDIRECTIONAL_PULL,
     BIDIRECTIONAL_PULL_VARIABLE_DATA_SIZE,
+    BIDIRECTIONAL_PREEMPTIVE_PUSH
   };
 
   int async_loop_index = -1;
   uint num_expected_objects;
 
   std::vector<TransferPattern> async_loop_patterns = {
-      PUSH_A_B,
-      PUSH_B_A,
+//      PUSH_A_B,
+//      PUSH_B_A,
       BIDIRECTIONAL_PUSH,
-      PULL_A_B,
-      PULL_B_A,
-      BIDIRECTIONAL_PULL,
-      BIDIRECTIONAL_PULL_VARIABLE_DATA_SIZE};
+//      PULL_A_B,
+//      PULL_B_A,
+//      BIDIRECTIONAL_PULL,
+//      BIDIRECTIONAL_PULL_VARIABLE_DATA_SIZE,
+//      BIDIRECTIONAL_PREEMPTIVE_PUSH
+  };
 
   int num_connected_clients = 0;
 
@@ -271,7 +274,7 @@ class StressTestObjectManager : public TestObjectManagerBase {
     async_loop_index += 1;
     if ((uint)async_loop_index < async_loop_patterns.size()) {
       TransferPattern pattern = async_loop_patterns[async_loop_index];
-      TransferTestExecute(100, 3 * std::pow(10, 3) - 1, pattern);
+      TransferTestExecute(1, 3 * std::pow(10, 5) - 1, pattern);
     } else {
       main_service.stop();
     }
@@ -346,7 +349,8 @@ class StressTestObjectManager : public TestObjectManagerBase {
 
     if (transfer_pattern == BIDIRECTIONAL_PULL ||
         transfer_pattern == BIDIRECTIONAL_PUSH ||
-        transfer_pattern == BIDIRECTIONAL_PULL_VARIABLE_DATA_SIZE) {
+        transfer_pattern == BIDIRECTIONAL_PULL_VARIABLE_DATA_SIZE ||
+        transfer_pattern == BIDIRECTIONAL_PREEMPTIVE_PUSH) {
       num_expected_objects = (uint)2 * num_trials;
     } else {
       num_expected_objects = (uint)num_trials;
@@ -395,17 +399,28 @@ class StressTestObjectManager : public TestObjectManagerBase {
         status = server1->object_manager_.Pull(oid2);
       }
     } break;
-    case BIDIRECTIONAL_PULL_VARIABLE_DATA_SIZE: {
-      std::random_device rd;
-      std::mt19937 gen(rd());
-      std::uniform_int_distribution<> dis(1, 50);
-      for (int i = -1; ++i < num_trials;) {
-        ObjectID oid1 = WriteDataToClient(client1, data_size + dis(gen));
-        status = server2->object_manager_.Pull(oid1);
-        ObjectID oid2 = WriteDataToClient(client2, data_size + dis(gen));
-        status = server1->object_manager_.Pull(oid2);
-      }
-    } break;
+      case BIDIRECTIONAL_PULL_VARIABLE_DATA_SIZE: {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dis(1, 50);
+        for (int i = -1; ++i < num_trials;) {
+          ObjectID oid1 = WriteDataToClient(client1, data_size + dis(gen));
+          status = server2->object_manager_.Pull(oid1);
+          ObjectID oid2 = WriteDataToClient(client2, data_size + dis(gen));
+          status = server1->object_manager_.Pull(oid2);
+        }
+      } break;
+      case BIDIRECTIONAL_PREEMPTIVE_PUSH: {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dis(1, 50);
+        for (int i = -1; ++i < num_trials;) {
+          ObjectID oid1 = WriteDataToClient(client1, data_size + dis(gen));
+          status = server2->object_manager_.Pull(oid1);
+          ObjectID oid2 = WriteDataToClient(client2, data_size + dis(gen));
+          status = server1->object_manager_.Pull(oid2);
+        }
+      } break;
     default: {
       RAY_LOG(FATAL) << "No case for transfer_pattern " << transfer_pattern;
     } break;
