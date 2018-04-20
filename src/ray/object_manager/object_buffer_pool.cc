@@ -67,7 +67,7 @@ std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> ObjectBufferPool::Ge
 void ObjectBufferPool::ReleaseGetChunk(const ObjectID &object_id, uint64_t chunk_index) {
   std::lock_guard<std::mutex> lock(pool_mutex_);
   GetBufferState &buffer_state = get_buffer_state_[object_id];
-  // buffer_state.references--;
+  buffer_state.references--;
   RAY_LOG(DEBUG) << "ReleaseBuffer " << object_id << " " << buffer_state.references;
   if (buffer_state.references == 0) {
     ARROW_CHECK_OK(store_client_.Release(ObjectID(object_id).to_plasma_id()));
