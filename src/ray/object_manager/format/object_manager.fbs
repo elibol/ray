@@ -16,6 +16,8 @@ table PushRequestMessage {
   data_size: ulong;
   // The metadata size.
   metadata_size: ulong;
+  // The buffer size.
+  buffer_length: ulong;
 }
 
 table PullRequestMessage {

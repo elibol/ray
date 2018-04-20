@@ -189,6 +189,9 @@ ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
   auto message = object_manager_protocol::CreatePullRequestMessage(
       fbb, fbb.CreateString(client_id_.binary()), fbb.CreateString(object_id.binary()));
   fbb.Finish(message);
+  log_lock_.lock();
+  RAY_LOG(INFO) << "write pull " << conn->GetConnectionID() << " " << object_id << " " << fbb.GetSize();
+  log_lock_.unlock();
   RAY_CHECK_OK(conn->WriteMessage(object_manager_protocol::MessageType_PullRequest,
                                   fbb.GetSize(), fbb.GetBufferPointer()));
   RAY_CHECK_OK(
@@ -265,8 +268,11 @@ ray::Status ObjectManager::SendObjectHeaders(const ObjectID &object_id,
   flatbuffers::FlatBufferBuilder fbb;
   // TODO(hme): use to_flatbuf
   auto message = object_manager_protocol::CreatePushRequestMessage(
-      fbb, fbb.CreateString(object_id.binary()), chunk_index, data_size, metadata_size);
+      fbb, fbb.CreateString(object_id.binary()), chunk_index, data_size, metadata_size, chunk_info.buffer_length);
   fbb.Finish(message);
+  log_lock_.lock();
+  RAY_LOG(INFO) << "write push " << conn->GetConnectionID() << " " << object_id << " " << chunk_info.chunk_index << " " << fbb.GetSize();
+  log_lock_.unlock();
   ray::Status status =
       conn->WriteMessage(object_manager_protocol::MessageType_PushRequest, fbb.GetSize(),
                          fbb.GetBufferPointer());
@@ -281,7 +287,7 @@ ray::Status ObjectManager::SendObjectData(const ObjectID &object_id,
   std::vector<asio::const_buffer> buffer;
   buffer.push_back(asio::buffer(chunk_info.data, chunk_info.buffer_length));
   log_lock_.lock();
-  RAY_LOG(INFO) << "write " << object_id << " " << chunk_info.chunk_index << " " << chunk_info.buffer_length;
+  RAY_LOG(INFO) << "write " << conn->GetConnectionID() << " " << object_id << " " << chunk_info.chunk_index << " " << chunk_info.buffer_length;
   log_lock_.unlock();
   conn->WriteBuffer(buffer, ec);
 
@@ -402,11 +408,13 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn
   uint64_t chunk_index = object_header->chunk_index();
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
-  receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn]() {
+  uint64_t buffer_length = object_header->buffer_length();
+  receive_service_.post([this, object_id, data_size, metadata_size, buffer_length, chunk_index, conn]() {
     ExecuteReceiveObject(conn->GetClientID(),
                          object_id,
                          data_size,
                          metadata_size,
+                         buffer_length,
                          chunk_index,
                          conn);
   });
@@ -416,6 +424,7 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
                                          const ObjectID &object_id,
                                          uint64_t data_size,
                                          uint64_t metadata_size,
+                                         uint64_t buffer_length,
                                          uint64_t chunk_index,
                                          std::shared_ptr<TcpClientConnection> conn) {
   RAY_LOG(DEBUG) << "ExecuteReceiveObject " << client_id << " " << object_id << " "
@@ -430,6 +439,7 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     buffer.push_back(asio::buffer(chunk_info.data, chunk_info.buffer_length));
     boost::system::error_code ec;
     log_lock_.lock();
+    RAY_CHECK(buffer_length == chunk_info.buffer_length);
     RAY_LOG(INFO) << "read ok " << object_id << " " << chunk_index << " " << chunk_info.buffer_length;
     log_lock_.unlock();
     conn->ReadBuffer(buffer, ec);
@@ -446,7 +456,7 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
                      << chunk_status.second.message();
     }
     // Read object into empty buffer.
-    uint64_t buffer_length = buffer_pool_.GetBufferLength(chunk_index, data_size);
+    RAY_CHECK(buffer_length == buffer_pool_.GetBufferLength(chunk_index, data_size));
     std::vector<uint8_t> mutable_vec;
     mutable_vec.resize(buffer_length);
     std::vector<boost::asio::mutable_buffer> buffer;
