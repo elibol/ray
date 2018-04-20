@@ -280,6 +280,9 @@ ray::Status ObjectManager::SendObjectData(const ObjectID &object_id,
   boost::system::error_code ec;
   std::vector<asio::const_buffer> buffer;
   buffer.push_back(asio::buffer(chunk_info.data, chunk_info.buffer_length));
+  log_lock_.lock();
+  RAY_LOG(INFO) << "write " << object_id << " " << chunk_info.chunk_index << " " << chunk_info.buffer_length;
+  log_lock_.unlock();
   conn->WriteBuffer(buffer, ec);
 
   ray::Status status = ray::Status::OK();
@@ -400,14 +403,20 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
   receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn]() {
-    ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
-                         chunk_index, conn);
+    ExecuteReceiveObject(conn->GetClientID(),
+                         object_id,
+                         data_size,
+                         metadata_size,
+                         chunk_index,
+                         conn);
   });
 }
 
 void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
-                                         const ObjectID &object_id, uint64_t data_size,
-                                         uint64_t metadata_size, uint64_t chunk_index,
+                                         const ObjectID &object_id,
+                                         uint64_t data_size,
+                                         uint64_t metadata_size,
+                                         uint64_t chunk_index,
                                          std::shared_ptr<TcpClientConnection> conn) {
   RAY_LOG(DEBUG) << "ExecuteReceiveObject " << client_id << " " << object_id << " "
                  << chunk_index;
@@ -440,6 +449,9 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     std::vector<boost::asio::mutable_buffer> buffer;
     buffer.push_back(asio::buffer(mutable_vec, buffer_length));
     boost::system::error_code ec;
+    log_lock_.lock();
+    RAY_LOG(INFO) << "read " << object_id << " " << chunk_index << " " << buffer_length;
+    log_lock_.unlock();
     conn->ReadBuffer(buffer, ec);
     if (ec.value() != 0) {
       RAY_LOG(ERROR) << ec.message();
