@@ -62,7 +62,7 @@ class SenderConnection : public boost::enable_shared_from_this<SenderConnection>
   }
 
   uint64_t GetConnectionID(){
-    return id_counter_;
+    return connection_id_;
   }
 
   /// \return The ClientID of this connection.
