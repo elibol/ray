@@ -439,7 +439,14 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     buffer.push_back(asio::buffer(chunk_info.data, chunk_info.buffer_length));
     boost::system::error_code ec;
     log_lock_.lock();
-    RAY_CHECK(buffer_length == chunk_info.buffer_length);
+
+    if(buffer_length != chunk_info.buffer_length) {
+      RAY_LOG(INFO) << object_id << " "
+          << chunk_index << " " << chunk_info.chunk_index << " "
+          << buffer_length << " " << chunk_info.buffer_length << " "
+          << data_size << " ";
+      RAY_CHECK(buffer_length == chunk_info.buffer_length);
+    }
     RAY_LOG(INFO) << "read ok " << object_id << " " << chunk_index << " " << chunk_info.buffer_length;
     log_lock_.unlock();
     conn->ReadBuffer(buffer, ec);
@@ -456,7 +463,13 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
                      << chunk_status.second.message();
     }
     // Read object into empty buffer.
-    RAY_CHECK(buffer_length == buffer_pool_.GetBufferLength(chunk_index, data_size));
+    if(buffer_length != buffer_pool_.GetBufferLength(chunk_index, data_size)) {
+      RAY_LOG(INFO) << object_id << " "
+                    << chunk_index << " "
+                    << buffer_length << " " << buffer_pool_.GetBufferLength(chunk_index, data_size) << " "
+                    << data_size << " ";
+      RAY_CHECK(buffer_length == buffer_pool_.GetBufferLength(chunk_index, data_size));
+    }
     std::vector<uint8_t> mutable_vec;
     mutable_vec.resize(buffer_length);
     std::vector<boost::asio::mutable_buffer> buffer;
