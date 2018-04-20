@@ -58,9 +58,8 @@ std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> ObjectBufferPool::Ge
         std::piecewise_construct, std::forward_as_tuple(object_id),
         std::forward_as_tuple(BuildChunks(object_id, data, data_size)));
     RAY_CHECK(get_buffer_state_[object_id].chunk_info.size() == num_chunks);
-    get_buffer_state_[object_id].references += num_chunks;
   }
-  // get_buffer_state_[object_id].references++;
+  get_buffer_state_[object_id].references++;
   return std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status>(
       get_buffer_state_[object_id].chunk_info[chunk_index], ray::Status::OK());
 }
@@ -68,7 +67,7 @@ std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> ObjectBufferPool::Ge
 void ObjectBufferPool::ReleaseGetChunk(const ObjectID &object_id, uint64_t chunk_index) {
   std::lock_guard<std::mutex> lock(pool_mutex_);
   GetBufferState &buffer_state = get_buffer_state_[object_id];
-  buffer_state.references--;
+  // buffer_state.references--;
   RAY_LOG(DEBUG) << "ReleaseBuffer " << object_id << " " << buffer_state.references;
   if (buffer_state.references == 0) {
     ARROW_CHECK_OK(store_client_.Release(ObjectID(object_id).to_plasma_id()));
