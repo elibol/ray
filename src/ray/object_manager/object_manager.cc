@@ -294,6 +294,7 @@ ray::Status ObjectManager::SendObjectData(const ObjectID &object_id,
   if (ec.value() != 0) {
     // Push failed. Deal with partial objects on the receiving end.
     // TODO(hme): Try to invoke disconnect on sender connection, then remove it.
+    RAY_LOG(INFO) << "write error " << conn->GetConnectionID() << " " << object_id << " " << chunk_info.chunk_index << " " << chunk_info.buffer_length;
     status = ray::Status::IOError(ec.message());
   }
 
