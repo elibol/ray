@@ -110,7 +110,7 @@ void ClientConnection<T>::ProcessMessageHeader(const boost::system::error_code &
 
   // If there was no error, make sure the protocol version matches.
   if (read_version_ != RayConfig::instance().ray_protocol_version()){
-    RAY_LOG(FATAL) "version mismatch: " << " " << GetIsTransfer();
+    RAY_LOG(FATAL) "version mismatch: " << " " << GetIsTransfer() << " " << read_version_ << " " << read_type_ << " " << read_length_;
   }
 
   // Resize the message buffer to match the received length.
