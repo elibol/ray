@@ -173,7 +173,7 @@ std::vector<ObjectBufferPool::ChunkInfo> ObjectBufferPool::BuildChunks(
     const ObjectID &object_id, uint8_t *data, uint64_t data_size) {
   uint64_t space_remaining = data_size;
   std::vector<ChunkInfo> chunks;
-  int64_t position = 0;
+  uint64_t position = 0;
   while (space_remaining) {
     position = data_size - space_remaining;
     if (space_remaining < chunk_size_) {

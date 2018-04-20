@@ -194,8 +194,7 @@ ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
   log_lock_.unlock();
   RAY_CHECK_OK(conn->WriteMessage(object_manager_protocol::MessageType_PullRequest,
                                   fbb.GetSize(), fbb.GetBufferPointer()));
-  RAY_CHECK_OK(
-      connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
+  // RAY_CHECK_OK(connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
   return ray::Status::OK();
 }
 
@@ -300,8 +299,7 @@ ray::Status ObjectManager::SendObjectData(const ObjectID &object_id,
 
   // Do this regardless of whether it failed or succeeded.
   buffer_pool_.ReleaseGetChunk(object_id, chunk_info.chunk_index);
-  RAY_CHECK_OK(
-      connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, conn));
+  // RAY_CHECK_OK(connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, conn));
   RAY_LOG(DEBUG) << "SendCompleted " << client_id_ << " " << object_id << " "
                  << config_.max_sends;
   return status;
