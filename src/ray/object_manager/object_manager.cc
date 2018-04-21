@@ -86,6 +86,9 @@ void ObjectManager::NotifyDirectoryObjectAdd(const ObjectInfoT &object_info) {
   local_objects_[object_id] = object_info;
   ray::Status status =
       object_directory_->ReportObjectAdded(object_id, client_id_, object_info);
+  // Only mark an object as no longer in transit when we receive notification
+  // from the object store.
+  RemoveObjectInTransit(object_id);
 }
 
 void ObjectManager::NotifyDirectoryObjectDeleted(const ObjectID &object_id) {
@@ -106,6 +109,13 @@ ray::Status ObjectManager::SubscribeObjDeleted(
 }
 
 ray::Status ObjectManager::Pull(const ObjectID &object_id) {
+  if (ObjectInTransitOrLocal(object_id)) {
+    // Currently, there's no guarantee that the transfer will happen.
+    // Do nothing if the object is already being received.
+    RAY_LOG(INFO) << "Object "
+                  << (local_objects_.count(object_id) == 0 ? "in transit." : "is local.");
+    return ray::Status::OK();
+  }
   return PullGetLocations(object_id);
 }
 
@@ -141,14 +151,21 @@ void ObjectManager::GetLocationsFailed(const ObjectID &object_id) {
 }
 
 ray::Status ObjectManager::Pull(const ObjectID &object_id, const ClientID &client_id) {
+  if (ObjectInTransitOrLocal(object_id)) {
+    // Currently, there's no guarantee that the transfer will happen.
+    // Do nothing if the object is already being received.
+    RAY_LOG(INFO) << "Object "
+                  << (local_objects_.count(object_id) == 0 ? "in transit." : "is local.");
+    return ray::Status::OK();
+  }
   return PullEstablishConnection(object_id, client_id);
 };
 
 ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
                                                    const ClientID &client_id) {
-  // Check if object is already local, and client_id is not itself.
-  if (local_objects_.count(object_id) != 0 || client_id == client_id_) {
-    return ray::Status::OK();
+  // Check client_id is not itself.
+  if (client_id == client_id_) {
+    return ray::Status::Invalid("Cannot pull object from self.");
   }
 
   // Acquire a message connection and send pull request.
@@ -172,19 +189,32 @@ ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
               ConnectionPool::ConnectionType::MESSAGE, connection_info);
           connection_pool_.RegisterSender(ConnectionPool::ConnectionType::MESSAGE,
                                           client_id, async_conn);
-          RAY_CHECK_OK(PullSendRequest(object_id, async_conn));
+          Status pull_send_status = PullSendRequest(object_id, async_conn);
+          if (!pull_send_status.ok()) {
+            RAY_LOG(INFO) << pull_send_status.message();
+          }
         },
         [this, object_id](const Status &status) {
           SchedulePull(object_id, config_.pull_timeout_ms);
         });
   } else {
-    RAY_CHECK_OK(PullSendRequest(object_id, conn));
+    status = PullSendRequest(object_id, conn);
   }
   return status;
 }
 
 ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
                                            std::shared_ptr<SenderConnection> conn) {
+  if (ObjectInTransitOrLocal(object_id)) {
+    // Do nothing if the object is already being received.
+    // We check here too just in case the object ends up in transit
+    // in the time between this method call and the Pull method call.
+    RAY_CHECK_OK(
+        connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
+    RAY_LOG(INFO) << "Object "
+                  << (local_objects_.count(object_id) == 0 ? "in transit." : "is local.");
+    return Status::OK();
+  }
   flatbuffers::FlatBufferBuilder fbb;
   auto message = object_manager_protocol::CreatePullRequestMessage(
       fbb, fbb.CreateString(client_id_.binary()), fbb.CreateString(object_id.binary()));
@@ -408,6 +438,10 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
   uint64_t buffer_length = object_header->buffer_length();
+  if (!ObjectInTransitOrLocal(object_id)) {
+    // Record that the object is in progress.
+    AddObjectInTransit(object_id);
+  }
   receive_service_.post([this, object_id, data_size, metadata_size, buffer_length, chunk_index, conn]() {
     ExecuteReceiveObject(conn->GetClientID(),
                          object_id,

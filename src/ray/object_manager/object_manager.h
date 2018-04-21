@@ -188,6 +188,29 @@ class ObjectManager {
   /// Cache of locally available objects.
   std::unordered_map<ObjectID, ObjectInfoT, UniqueIDHasher> local_objects_;
 
+  // TODO(hme): Also suppress Push for objects already in transit.
+  /// Objects that are currently being received.
+  std::unordered_set<ObjectID, UniqueIDHasher> in_transit_receives_;
+
+  /// Record an object receive as soon as one of its chunks begins
+  /// being received.
+  void AddObjectInTransit(const ObjectID &object_id) {
+    in_transit_receives_.insert(object_id);
+  }
+
+  /// Remove an object receive as soon as the object store dispatches
+  /// an added event.
+  void RemoveObjectInTransit(const ObjectID &object_id) {
+    in_transit_receives_.erase(object_id);
+  }
+
+  /// Returns true if an object receive is currently in transit.
+  /// This is checked by the Pull method.
+  bool ObjectInTransitOrLocal(const ObjectID &object_id) const {
+    return in_transit_receives_.count(object_id) > 0 ||
+           local_objects_.count(object_id) > 0;
+  }
+
   /// Handle starting, running, and stopping asio io_service.
   void StartIOService();
   void RunSendService();
