@@ -57,6 +57,12 @@ class NodeManager {
   ray::Status RegisterGcs();
 
  private:
+  int64_t current_time_ms() {
+    std::chrono::milliseconds ms_since_epoch =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch());
+    return ms_since_epoch.count();
+  }
   // Handler for the addition of a new GCS client.
   void ClientAdded(const ClientTableDataT &data);
   // Handler for the creation of an actor, possibly on a remote node.

@@ -293,6 +293,7 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
 
   switch (message_type) {
   case protocol::MessageType_RegisterClientRequest: {
+    RAY_LOG(INFO) << "MessageType_RegisterClientRequest START " << current_time_ms();
     auto message = flatbuffers::GetRoot<protocol::RegisterClientRequest>(message_data);
     if (message->is_worker()) {
       // Create a new worker from the registration request.
@@ -300,8 +301,10 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
       // Register the new worker.
       worker_pool_.RegisterWorker(std::move(worker));
     }
+    RAY_LOG(INFO) << "MessageType_RegisterClientRequest END " << current_time_ms();
   } break;
   case protocol::MessageType_GetTask: {
+    RAY_LOG(INFO) << "MessageType_GetTask START " << current_time_ms();
     std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
     RAY_CHECK(worker);
     // If the worker was assigned a task, mark it as finished.
@@ -312,9 +315,11 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     worker_pool_.PushWorker(worker);
     // Call task dispatch to assign work to the new worker.
     DispatchTasks();
+    RAY_LOG(INFO) << "MessageType_GetTask END " << current_time_ms();
 
   } break;
   case protocol::MessageType_DisconnectClient: {
+    RAY_LOG(INFO) << "MessageType_DisconnectClient START " << current_time_ms();
     // Remove the dead worker from the pool and stop listening for messages.
     const std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
     if (worker) {
@@ -325,9 +330,11 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
       //    << "Worker died while executing task: " << worker->GetAssignedTaskId();
       worker_pool_.DisconnectWorker(worker);
     }
+    RAY_LOG(INFO) << "MessageType_DisconnectClient END " << current_time_ms();
     return;
   } break;
   case protocol::MessageType_SubmitTask: {
+    RAY_LOG(INFO) << "MessageType_SubmitTask START " << current_time_ms();
     // Read the task submitted by the client.
     auto message = flatbuffers::GetRoot<protocol::SubmitTaskRequest>(message_data);
     TaskExecutionSpecification task_execution_spec(
@@ -337,8 +344,10 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     // Submit the task to the local scheduler. Since the task was submitted
     // locally, there is no uncommitted lineage.
     SubmitTask(task, Lineage());
+    RAY_LOG(INFO) << "MessageType_SubmitTask END " << current_time_ms();
   } break;
   case protocol::MessageType_ReconstructObject: {
+    RAY_LOG(INFO) << "MessageType_ReconstructObject START " << current_time_ms();
     // TODO(hme): handle multiple object ids.
     auto message = flatbuffers::GetRoot<protocol::ReconstructObject>(message_data);
     ObjectID object_id = from_flatbuf(*message->object_id());
@@ -372,8 +381,10 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
       // resources.
       DispatchTasks();
     }
+    RAY_LOG(INFO) << "MessageType_ReconstructObject END " << current_time_ms();
   } break;
   case protocol::MessageType_NotifyUnblocked: {
+    RAY_LOG(INFO) << "MessageType_NotifyUnblocked START " << current_time_ms();
     std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
     // Re-acquire the CPU resources for the task that was assigned to the
     // unblocked worker.
@@ -403,6 +414,7 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
       local_queues_.QueueRunningTasks(tasks);
       worker->MarkUnblocked();
     }
+    RAY_LOG(INFO) << "MessageType_NotifyUnblocked END " << current_time_ms();
   } break;
 
   default:
@@ -716,6 +728,9 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
         for (int j = 0; j < count; j++) {
           ObjectID argument_id = spec.ArgId(i, j);
           // If the argument is local, then push it to the receiving node.
+          RAY_LOG(INFO) << "ForwardTask: Preemptive Push "
+                        << argument_id << " "
+                        << task_dependency_manager_.CheckObjectLocal(argument_id);
           if (task_dependency_manager_.CheckObjectLocal(argument_id)) {
             RAY_CHECK_OK(object_manager_.Push(argument_id, node_id));
           }

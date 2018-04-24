@@ -88,7 +88,10 @@ void ObjectManager::NotifyDirectoryObjectAdd(const ObjectInfoT &object_info) {
       object_directory_->ReportObjectAdded(object_id, client_id_, object_info);
   // Only mark an object as no longer in transit when we receive notification
   // from the object store.
-  RemoveObjectInTransit(object_id);
+  if (in_transit_receives_.count(object_id) > 0){
+    RemoveObjectInTransit(object_id);
+    RAY_LOG(INFO) << "ReceivePush END " << object_id << current_time_ms();
+  }
 }
 
 void ObjectManager::NotifyDirectoryObjectDeleted(const ObjectID &object_id) {
@@ -117,6 +120,7 @@ ray::Status ObjectManager::Pull(const ObjectID &object_id) {
                                                             : "is local ");
     return ray::Status::OK();
   }
+  RAY_LOG(INFO) << "Pull START " << object_id << current_time_ms();
   return PullGetLocations(object_id);
 }
 
@@ -248,6 +252,7 @@ ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
   if (pull_requests_.count(object_id) > 0){
     pull_requests_.erase(object_id);
   }
+  RAY_LOG(INFO) << "Pull END " << object_id << current_time_ms();
   return ray::Status::OK();
 }
 
@@ -263,6 +268,8 @@ ray::Status ObjectManager::Push(const ObjectID &object_id, const ClientID &clien
     // Object already being sent to client.
     return ray::Status::OK();
   }
+
+  RAY_LOG(INFO) << "SendPush START " << object_id << current_time_ms();
 
   const ObjectInfoT &object_info = local_objects_[object_id];
   uint64_t data_size =
@@ -454,6 +461,7 @@ void ObjectManager::ReceivePullRequest(std::shared_ptr<TcpClientConnection> &con
   auto pr = flatbuffers::GetRoot<object_manager_protocol::PullRequestMessage>(message);
   ObjectID object_id = ObjectID::from_binary(pr->object_id()->str());
   ClientID client_id = ClientID::from_binary(pr->client_id()->str());
+  RAY_LOG(INFO) << "ReceivePullRequest EVENT " << object_id << current_time_ms();
   ray::Status push_status = Push(object_id, client_id);
   conn->ProcessMessages();
 }
@@ -472,6 +480,7 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn
     AddObjectInTransit(object_id);
     RAY_LOG(DEBUG) << "Receive Push " << object_id;
   }
+  RAY_LOG(INFO) << "ReceivePush START " << object_id << current_time_ms();
   receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn]() {
     ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
                          chunk_index, conn);
