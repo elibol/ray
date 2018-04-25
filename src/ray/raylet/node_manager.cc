@@ -750,9 +750,9 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
           RAY_LOG(INFO) << "ForwardTask: Preemptive Push "
                         << argument_id << " "
                         << task_dependency_manager_.CheckObjectLocal(argument_id);
-          if (task_dependency_manager_.CheckObjectLocal(argument_id)) {
-            RAY_CHECK_OK(object_manager_.Push(argument_id, node_id));
-          }
+          // if (task_dependency_manager_.CheckObjectLocal(argument_id)) {
+          RAY_CHECK_OK(object_manager_.Push(argument_id, node_id));
+          //}
         }
       }
     }
