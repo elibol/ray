@@ -703,8 +703,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
 
   // Get and serialize the task's uncommitted lineage.
   RAY_LOG(INFO) << "GetUncommittedLineage START " << current_time_ms();
-  // auto uncommitted_lineage = lineage_cache_.GetUncommittedLineage(task_id);
-  Lineage uncommitted_lineage;
+  auto uncommitted_lineage = lineage_cache_.GetUncommittedLineage(task_id);
   RAY_LOG(INFO) << "GetUncommittedLineage END " << current_time_ms();
   Task &lineage_cache_entry_task =
       uncommitted_lineage.GetEntryMutable(task_id)->TaskDataMutable();

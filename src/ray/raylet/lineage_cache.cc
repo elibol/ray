@@ -156,6 +156,7 @@ void MergeLineageHelper(const UniqueID &task_id, const Lineage &lineage_from,
   // Insert a copy of the entry into lineage_to.
   LineageEntry entry_copy = *entry;
   auto parent_ids = entry_copy.GetParentTaskIds();
+  return;
   // If the insert is successful, then continue the DFS. The insert will fail
   // if the new entry has an equal or lower GCS status than the current entry
   // in lineage_to. This also prevents us from traversing the same node twice.
