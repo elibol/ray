@@ -314,8 +314,8 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     // Return the worker to the idle pool.
     worker_pool_.PushWorker(worker);
     // Call task dispatch to assign work to the new worker.
-    DispatchTasks();
     RAY_LOG(INFO) << "MessageType_GetTask END " << current_time_ms();
+    DispatchTasks();
 
   } break;
   case protocol::MessageType_DisconnectClient: {
@@ -379,9 +379,9 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
 
       // Try to dispatch more tasks since the blocked worker released some
       // resources.
+      RAY_LOG(INFO) << "MessageType_ReconstructObject END " << current_time_ms();
       DispatchTasks();
     }
-    RAY_LOG(INFO) << "MessageType_ReconstructObject END " << current_time_ms();
   } break;
   case protocol::MessageType_NotifyUnblocked: {
     RAY_LOG(INFO) << "MessageType_NotifyUnblocked START " << current_time_ms();
@@ -490,6 +490,7 @@ void NodeManager::ScheduleTasks() {
   // Transition locally scheduled tasks to SCHEDULED and dispatch scheduled tasks.
   std::vector<Task> tasks = local_queues_.RemoveTasks(local_task_ids);
   local_queues_.QueueScheduledTasks(tasks);
+  RAY_LOG(INFO) << "ScheduleTasks DispatchTasks " << current_time_ms();
   DispatchTasks();
 }
 
@@ -577,10 +578,12 @@ void NodeManager::AssignTask(Task &task) {
     // Queue this task for future assignment. The task will be assigned to a
     // worker once one becomes available.
     local_queues_.QueueScheduledTasks(std::vector<Task>({task}));
+    RAY_LOG(INFO) << "AssignTask FAIL " << task.GetTaskSpecification().TaskId() << " " << current_time_ms();
     return;
   }
 
   RAY_LOG(DEBUG) << "Assigning task to worker with pid " << worker->Pid();
+  RAY_LOG(INFO) << "AssignTask SUCCESS " << task.GetTaskSpecification().TaskId() << " " << current_time_ms();
   flatbuffers::FlatBufferBuilder fbb;
   auto message = protocol::CreateGetTaskReply(fbb, spec.ToFlatbuffer(fbb),
                                               fbb.CreateVector(std::vector<int>()));

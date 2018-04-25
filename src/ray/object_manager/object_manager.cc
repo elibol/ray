@@ -479,8 +479,8 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn
     // Record that the object is in progress.
     AddObjectInTransit(object_id);
     RAY_LOG(DEBUG) << "Receive Push " << object_id;
+    RAY_LOG(INFO) << "ReceivePush START " << object_id << " " << current_time_ms();
   }
-  RAY_LOG(INFO) << "ReceivePush START " << object_id << " " << current_time_ms();
   receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn]() {
     ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
                          chunk_index, conn);
