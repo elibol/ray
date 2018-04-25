@@ -435,6 +435,7 @@ void NodeManager::ProcessNodeManagerMessage(
     const uint8_t *message_data) {
   switch (message_type) {
   case protocol::MessageType_ForwardTaskRequest: {
+    RAY_LOG(INFO) << "MessageType_ForwardTaskRequest START " << current_time_ms();
     auto message = flatbuffers::GetRoot<protocol::ForwardTaskRequest>(message_data);
     TaskID task_id = from_flatbuf(*message->task_id());
 
@@ -443,6 +444,7 @@ void NodeManager::ProcessNodeManagerMessage(
     RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
                    << " spillback=" << task.GetTaskExecutionSpecReadonly().NumForwards();
     SubmitTask(task, uncommitted_lineage);
+    RAY_LOG(INFO) << "MessageType_ForwardTaskRequest END " << current_time_ms();
   } break;
   default:
     RAY_LOG(FATAL) << "Received unexpected message type " << message_type;
@@ -451,13 +453,16 @@ void NodeManager::ProcessNodeManagerMessage(
 }
 
 void NodeManager::HandleWaitingTaskReady(const TaskID &task_id) {
+  RAY_LOG(INFO) << "HandleWaitingTaskReady START " << current_time_ms();
   auto ready_tasks = local_queues_.RemoveTasks({task_id});
   local_queues_.QueueReadyTasks(std::vector<Task>(ready_tasks));
   // Schedule the newly ready tasks if possible.
   ScheduleTasks();
+  RAY_LOG(INFO) << "HandleWaitingTaskReady END " << current_time_ms();
 }
 
 void NodeManager::ScheduleTasks() {
+  RAY_LOG(INFO) << "ScheduleTasks START " << current_time_ms();
   // This method performs the transition of tasks from PENDING to SCHEDULED.
   auto policy_decision = scheduling_policy_.Schedule(
       cluster_resource_map_, gcs_client_->client_table().GetLocalClientId(),
@@ -490,11 +495,12 @@ void NodeManager::ScheduleTasks() {
   // Transition locally scheduled tasks to SCHEDULED and dispatch scheduled tasks.
   std::vector<Task> tasks = local_queues_.RemoveTasks(local_task_ids);
   local_queues_.QueueScheduledTasks(tasks);
-  RAY_LOG(INFO) << "ScheduleTasks DispatchTasks " << current_time_ms();
   DispatchTasks();
+  RAY_LOG(INFO) << "ScheduleTasks END " << current_time_ms();
 }
 
 void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineage) {
+  RAY_LOG(INFO) << "SubmitTask START " << current_time_ms();
   const TaskSpecification &spec = task.GetTaskSpecification();
 
   // Add the task and its uncommitted lineage to the lineage cache.
@@ -542,9 +548,11 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
     // This is a non-actor task. Queue the task for local execution.
     QueueTask(task);
   }
+  RAY_LOG(INFO) << "SubmitTask END " << current_time_ms();
 }
 
 void NodeManager::QueueTask(const Task &task) {
+  RAY_LOG(INFO) << "QueueTask START " << current_time_ms();
   // Queue the task depending on the availability of its arguments.
   if (task_dependency_manager_.TaskReady(task)) {
     local_queues_.QueueReadyTasks(std::vector<Task>({task}));
@@ -553,15 +561,18 @@ void NodeManager::QueueTask(const Task &task) {
     local_queues_.QueueWaitingTasks(std::vector<Task>({task}));
     task_dependency_manager_.SubscribeTaskReady(task);
   }
+  RAY_LOG(INFO) << "QueueTask END " << current_time_ms();
 }
 
 void NodeManager::AssignTask(Task &task) {
+  RAY_LOG(INFO) << "AssignTask START " << current_time_ms();
   const TaskSpecification &spec = task.GetTaskSpecification();
 
   // If this is an actor task, check that the new task has the correct counter.
   if (spec.IsActorTask()) {
     if (CheckDuplicateActorTask(actor_registry_, spec)) {
       // Drop tasks that have already been executed.
+      RAY_LOG(INFO) << "AssignTask END (duplicate) " << current_time_ms();
       return;
     }
   }
@@ -578,12 +589,11 @@ void NodeManager::AssignTask(Task &task) {
     // Queue this task for future assignment. The task will be assigned to a
     // worker once one becomes available.
     local_queues_.QueueScheduledTasks(std::vector<Task>({task}));
-    RAY_LOG(INFO) << "AssignTask FAIL " << task.GetTaskSpecification().TaskId() << " " << current_time_ms();
+    RAY_LOG(INFO) << "AssignTask END (noworker) " << task.GetTaskSpecification().TaskId() << " " << current_time_ms();
     return;
   }
 
   RAY_LOG(DEBUG) << "Assigning task to worker with pid " << worker->Pid();
-  RAY_LOG(INFO) << "AssignTask SUCCESS " << task.GetTaskSpecification().TaskId() << " " << current_time_ms();
   flatbuffers::FlatBufferBuilder fbb;
   auto message = protocol::CreateGetTaskReply(fbb, spec.ToFlatbuffer(fbb),
                                               fbb.CreateVector(std::vector<int>()));
@@ -629,9 +639,11 @@ void NodeManager::AssignTask(Task &task) {
     // worker once one becomes available.
     local_queues_.QueueScheduledTasks(std::vector<Task>({task}));
   }
+  RAY_LOG(INFO) << "AssignTask END " << task.GetTaskSpecification().TaskId() << " " << current_time_ms();
 }
 
 void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
+  RAY_LOG(INFO) << "FinishAssignedTask START " << current_time_ms();
   TaskID task_id = worker->GetAssignedTaskId();
   RAY_LOG(DEBUG) << "Finished task " << task_id;
   auto tasks = local_queues_.RemoveTasks({task_id});
@@ -677,6 +689,7 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
 
   // Unset the worker's assigned task.
   worker->AssignTaskId(TaskID::nil());
+  RAY_LOG(INFO) << "FinishAssignedTask END " << current_time_ms();
 }
 
 void NodeManager::ResubmitTask(const TaskID &task_id) {
@@ -684,11 +697,14 @@ void NodeManager::ResubmitTask(const TaskID &task_id) {
 }
 
 ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) {
+  RAY_LOG(INFO) << "ForwardTask START " << current_time_ms();
   const auto &spec = task.GetTaskSpecification();
   auto task_id = spec.TaskId();
 
   // Get and serialize the task's uncommitted lineage.
+  RAY_LOG(INFO) << "GetUncommittedLineage START " << current_time_ms();
   auto uncommitted_lineage = lineage_cache_.GetUncommittedLineage(task_id);
+  RAY_LOG(INFO) << "GetUncommittedLineage END " << current_time_ms();
   Task &lineage_cache_entry_task =
       uncommitted_lineage.GetEntryMutable(task_id)->TaskDataMutable();
   // Increment forward count for the forwarded task.
@@ -746,6 +762,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
     RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task " << task_id
                    << " to node " << node_id;
   }
+  RAY_LOG(INFO) << "ForwardTask END " << current_time_ms();
   return status;
 }
 
