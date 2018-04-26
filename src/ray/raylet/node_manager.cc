@@ -367,6 +367,7 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     // worker is unblocked.
     std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
     if (worker && !worker->IsBlocked()) {
+      RAY_LOG(INFO) << "MessageType_NotifyUnblocked BLOCKING WORKER " << current_time_ms();
       RAY_CHECK(!worker->GetAssignedTaskId().is_nil());
       auto tasks = local_queues_.RemoveTasks({worker->GetAssignedTaskId()});
       const auto &task = tasks.front();
