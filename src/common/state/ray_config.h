@@ -131,7 +131,7 @@ class RayConfig {
         // TODO: Setting this to large values results in latency, which needs to
         // be addressed. This timeout is often on the critical path for object
         // transfers.
-        object_manager_pull_timeout_ms_(100),
+        object_manager_pull_timeout_ms_(1000),
         object_manager_max_sends_(2),
         object_manager_max_receives_(2),
         object_manager_default_chunk_size_(100000000) {}
