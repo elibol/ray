@@ -112,6 +112,7 @@ ray::Status ObjectManager::SubscribeObjDeleted(
 }
 
 ray::Status ObjectManager::Pull(const ObjectID &object_id) {
+  return ray::Status::OK();
   if (ObjectInTransitOrLocal(object_id)) {
     // Currently, there's no guarantee that the transfer will happen.
     // Do nothing if the object is already being received.
