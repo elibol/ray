@@ -43,11 +43,11 @@ void TaskDependencyManager::handleObjectReady(const ray::ObjectID &object_id) {
   // Handle any tasks that were dependent on the newly available object.
   std::vector<TaskID> ready_task_ids;
   auto dependent_tasks = remote_object_dependencies_.find(object_id);
-  RAY_LOG(INFO) << "PREEMPTIVE PUSH RECEIVE ARRIVED "
-                << dependent_tasks->second[0] << " "
-                << object_id << " " << current_time_ms();
   if (dependent_tasks != remote_object_dependencies_.end()) {
     for (auto &dependent_task_id : dependent_tasks->second) {
+      RAY_LOG(INFO) << "PREEMPTIVE PUSH RECEIVE ARRIVED "
+                    << dependent_tasks->second[0] << " "
+                    << object_id << " " << current_time_ms();
       // If the dependent task now has all of its arguments ready, it's ready
       // to run.
       if (argumentsReady(task_dependencies_[dependent_task_id])) {
