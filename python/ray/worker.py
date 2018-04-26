@@ -474,7 +474,7 @@ class Worker(object):
         # repeat.
         while len(unready_ids) > 0:
             for unready_id in unready_ids:
-                with log_span("ray:block", self):
+                with log_span("ray:block", worker=self):
                     self.local_scheduler_client.reconstruct_object(unready_id)
             # Do another fetch for objects that aren't available locally yet,
             # in case they were evicted since the last fetch. We divide the
@@ -508,7 +508,7 @@ class Worker(object):
         # If there were objects that we weren't able to get locally, let the
         # local scheduler know that we're now unblocked.
         if was_blocked:
-            with log_span("ray:notify_unblocked", self):
+            with log_span("ray:notify_unblocked", worker=self):
                 self.local_scheduler_client.notify_unblocked()
 
         assert len(final_results) == len(object_ids)
