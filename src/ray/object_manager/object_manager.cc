@@ -125,6 +125,10 @@ ray::Status ObjectManager::Pull(const ObjectID &object_id) {
 }
 
 void ObjectManager::SchedulePull(const ObjectID &object_id, int wait_ms) {
+  if (ObjectInTransitOrLocal(object_id)){
+    pull_requests_.erase(object_id);
+    return;
+  }
   if (pull_requests_.count(object_id) == 0){
     pull_requests_.emplace(std::make_pair(
         ObjectID(object_id),
@@ -135,7 +139,7 @@ void ObjectManager::SchedulePull(const ObjectID &object_id, int wait_ms) {
     RAY_LOG(DEBUG) << object_id << " creating scheduler";
   }
   std::pair<std::shared_ptr<boost::asio::deadline_timer>, int> &time_retries = pull_requests_.find(object_id)->second;
-  if (time_retries.second >= 1000){
+  if (time_retries.second >= 5){
     RAY_LOG(DEBUG) << "failed to pull " << object_id;
     pull_requests_.erase(object_id);
     return;
@@ -150,6 +154,10 @@ void ObjectManager::SchedulePull(const ObjectID &object_id, int wait_ms) {
 
 ray::Status ObjectManager::PullGetLocations(const ObjectID &object_id) {
   RAY_LOG(DEBUG) << "pull_requests_.size()=" << pull_requests_.size();
+  if (ObjectInTransitOrLocal(object_id)){
+    pull_requests_.erase(object_id);
+    return ray::Status::OK();
+  }
 
   ray::Status status_code = object_directory_->GetLocations(
       object_id,
