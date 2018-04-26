@@ -340,10 +340,7 @@ ray::Status ObjectManager::SendObjectHeaders(const ObjectID &object_id,
   // If status is not okay, then return immediately because
   // plasma_client.Get failed.
   // No reference is acquired for this chunk, so no need to release the chunk.
-  if (!chunk_status.second.ok()) {
-    TryRemoveInTransitSend(object_id, conn->GetClientID());
-    return ray::Status::OK();
-  }
+  RAY_CHECK_OK(chunk_status.second);
 
   // Create buffer.
   flatbuffers::FlatBufferBuilder fbb;
