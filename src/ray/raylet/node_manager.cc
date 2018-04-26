@@ -68,7 +68,7 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
   object_manager_.SubscribeObjAdded([this](const ObjectInfoT &object_info){
     ObjectID oid = ObjectID::from_binary(object_info.object_id);
     if (push_objects_.count(oid) > 0){
-      RAY_LOG(INFO) << "PREEMPTIVE PUSH REACTIVE PUSH "
+      RAY_LOG(INFO) << "PREEMPTIVE PUSH SENT "
                     << oid << " " << current_time_ms();
       object_manager_.Push(oid, push_objects_[oid]);
       push_objects_.erase(oid);
@@ -757,7 +757,8 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
         for (int j = 0; j < count; j++) {
           ObjectID argument_id = spec.ArgId(i, j);
           // If the argument is local, then push it to the receiving node.
-          RAY_LOG(INFO) << "PREEMPTIVE PUSH OBJECT LOCAL? "
+          RAY_LOG(INFO) << "PREEMPTIVE PUSH SEND? "
+                        << task_id << " "
                         << argument_id << " "
                         << task_dependency_manager_.CheckObjectLocal(argument_id) << " "
                         << current_time_ms();
