@@ -125,10 +125,10 @@ ray::Status ObjectManager::Pull(const ObjectID &object_id) {
 }
 
 void ObjectManager::SchedulePull(const ObjectID &object_id, int wait_ms) {
-  if (ObjectInTransitOrLocal(object_id)){
-    pull_requests_.erase(object_id);
-    return;
-  }
+//  if (ObjectInTransitOrLocal(object_id)){
+//    pull_requests_.erase(object_id);
+//    return;
+//  }
   if (pull_requests_.count(object_id) == 0){
     pull_requests_.emplace(std::make_pair(
         ObjectID(object_id),
@@ -154,10 +154,10 @@ void ObjectManager::SchedulePull(const ObjectID &object_id, int wait_ms) {
 
 ray::Status ObjectManager::PullGetLocations(const ObjectID &object_id) {
   RAY_LOG(DEBUG) << "pull_requests_.size()=" << pull_requests_.size();
-  if (ObjectInTransitOrLocal(object_id)){
-    pull_requests_.erase(object_id);
-    return ray::Status::OK();
-  }
+//  if (ObjectInTransitOrLocal(object_id)){
+//    pull_requests_.erase(object_id);
+//    return ray::Status::OK();
+//  }
 
   ray::Status status_code = object_directory_->GetLocations(
       object_id,
