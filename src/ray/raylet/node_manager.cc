@@ -73,8 +73,8 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
                       << oid << " "
                       << cid << " " << current_time_ms();
         object_manager_.Push(oid, cid);
-        push_objects_[oid].erase(cid);
       }
+      push_objects_[oid].clear();
     }
   });
 }
