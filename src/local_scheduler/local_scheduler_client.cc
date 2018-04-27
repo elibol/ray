@@ -90,7 +90,7 @@ void local_scheduler_submit_raylet(
 
 TaskSpec *local_scheduler_get_task(LocalSchedulerConnection *conn,
                                    int64_t *task_size) {
-  RAY_LOG(INFO) << "MessageType_GetTask REQUEST " << current_time_ms();
+  RAY_LOG(DEBUG) << "MessageType_GetTask REQUEST " << current_time_ms();
   write_message(conn->conn, MessageType_GetTask, 0, NULL);
   int64_t type;
   int64_t reply_size;
@@ -98,7 +98,7 @@ TaskSpec *local_scheduler_get_task(LocalSchedulerConnection *conn,
   /* Receive a task from the local scheduler. This will block until the local
    * scheduler gives this client a task. */
   read_message(conn->conn, &type, &reply_size, &reply);
-  RAY_LOG(INFO) << "MessageType_GetTask RESPONSE " << current_time_ms();
+  RAY_LOG(DEBUG) << "MessageType_GetTask RESPONSE " << current_time_ms();
   if (type == DISCONNECT_CLIENT) {
     RAY_LOG(DEBUG) << "Exiting because local scheduler closed connection.";
     exit(1);
