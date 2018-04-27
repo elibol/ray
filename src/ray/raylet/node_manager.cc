@@ -68,9 +68,10 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
   object_manager_.SubscribeObjAdded([this](const ObjectInfoT &object_info){
     ObjectID oid = ObjectID::from_binary(object_info.object_id);
     if (push_objects_[oid].size() > 0){
-      RAY_LOG(INFO) << "PREEMPTIVE PUSH SENT "
-                    << oid << " " << current_time_ms();
       for (auto cid : push_objects_[oid]){
+        RAY_LOG(INFO) << "PREEMPTIVE PUSH SENT "
+                      << oid << " "
+                      << cid << " " << current_time_ms();
         object_manager_.Push(oid, cid);
         push_objects_[oid].erase(cid);
       }
