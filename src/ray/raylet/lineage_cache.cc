@@ -223,7 +223,7 @@ void LineageCache::AddReadyTask(const Task &task) {
 
   // Try to flush the task to the GCS.
   // TODO(swang): Allow a pluggable policy for when to flush.
-  RAY_CHECK_OK(Flush());
+  // RAY_CHECK_OK(Flush());
 }
 
 void LineageCache::RemoveWaitingTask(const TaskID &task_id) {
