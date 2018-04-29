@@ -241,7 +241,7 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
   // creator of the actor is always assigned nil as the actor handle ID.
   actor_registration.ExtendFrontier(ActorHandleID::nil(),
                                     actor_registration.GetActorCreationDependency());
-  auto inserted = actor_registry_.emplace(actor_id, std::move(actor_registration));
+  actor_registry_.emplace(actor_id, std::move(actor_registration));
   // RAY_CHECK(inserted.second);
 
   // Dequeue any methods that were submitted before the actor's location was
