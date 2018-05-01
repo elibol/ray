@@ -100,7 +100,7 @@ class NodeManager {
   /// The resources local to this node.
   const SchedulingResources local_resources_;
   // TODO(atumanov): Add resource information from other nodes.
-  std::unordered_map<ClientID, SchedulingResources, UniqueIDHasher> cluster_resource_map_;
+  std::unordered_map<ClientID, SchedulingResources> cluster_resource_map_;
   /// A pool of workers.
   WorkerPool worker_pool_;
   /// A set of queues to maintain tasks.
@@ -114,10 +114,10 @@ class NodeManager {
   /// The lineage cache for the GCS object and task tables.
   LineageCache lineage_cache_;
   std::vector<ClientID> remote_clients_;
-  std::unordered_map<ClientID, TcpServerConnection, UniqueIDHasher>
+  std::unordered_map<ClientID, TcpServerConnection>
       remote_server_connections_;
-  std::unordered_map<ActorID, ActorRegistration, UniqueIDHasher> actor_registry_;
-  std::unordered_map<ObjectID, std::unordered_set<ClientID, UniqueIDHasher>, UniqueIDHasher> push_objects_;
+  std::unordered_map<ActorID, ActorRegistration> actor_registry_;
+  std::unordered_map<ObjectID, std::unordered_set<ClientID>> push_objects_;
 };
 
 }  // namespace raylet

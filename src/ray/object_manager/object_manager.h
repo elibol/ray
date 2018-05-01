@@ -179,20 +179,18 @@ class ObjectManager {
   ConnectionPool connection_pool_;
 
   /// Timeout for failed pull requests.
-  std::unordered_map<ObjectID, std::pair<std::shared_ptr<boost::asio::deadline_timer>, int>,
-                     UniqueIDHasher>
+  std::unordered_map<ObjectID, std::pair<std::shared_ptr<boost::asio::deadline_timer>, int>>
       pull_requests_;
 
   /// Cache of locally available objects.
-  std::unordered_map<ObjectID, ObjectInfoT, UniqueIDHasher> local_objects_;
+  std::unordered_map<ObjectID, ObjectInfoT> local_objects_;
 
   /// Objects that are currently being sent.
-  std::unordered_map<ObjectID, std::unordered_map<ObjectID, uint64_t, UniqueIDHasher>,
-                     UniqueIDHasher>
+  std::unordered_map<ObjectID, std::unordered_map<ObjectID, uint64_t>>
       in_transit_sends_;
 
   /// Objects that are currently being received.
-  std::unordered_set<ObjectID, UniqueIDHasher> in_transit_receives_;
+  std::unordered_set<ObjectID> in_transit_receives_;
 
   void TryRemoveInTransitSend(const ObjectID &object_id, const ClientID &client_id) {
     main_service_->post([this, object_id, client_id](){
