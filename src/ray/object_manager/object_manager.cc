@@ -119,10 +119,12 @@ ray::Status ObjectManager::Pull(const ObjectID &object_id) {
                                                             : "is local ");
     return ray::Status::OK();
   }
+  RAY_LOG(INFO) << "Pull " << object_id;
   return PullGetLocations(object_id);
 }
 
 void ObjectManager::SchedulePull(const ObjectID &object_id, int wait_ms) {
+  RAY_LOG(INFO) << "SchedulePull " << object_id;
   if (ObjectInTransitOrLocal(object_id)){
     pull_requests_.erase(object_id);
     return;
