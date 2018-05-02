@@ -64,6 +64,12 @@ class TaskDependencyManager {
   void MarkDependencyReady(const ObjectID &object_id);
 
  private:
+  int64_t current_time_ms() {
+    std::chrono::milliseconds ms_since_epoch =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch());
+    return ms_since_epoch.count();
+  }
   /// Check whether the given list of objects are ready.
   bool argumentsReady(const std::vector<ObjectID> arguments) const;
   /// Handle an object added to the object store.

@@ -69,6 +69,9 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
     ObjectID oid = ObjectID::from_binary(object_info.object_id);
     if (push_objects_[oid].size() > 0){
       for (auto cid : push_objects_[oid]){
+        RAY_LOG(INFO) << "PREEMPTIVE PUSH SENT "
+                      << oid << " "
+                      << cid << " " << current_time_ms();
         object_manager_.Push(oid, cid);
       }
       push_objects_[oid].clear();
@@ -302,6 +305,7 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
 
   switch (message_type) {
   case protocol::MessageType_RegisterClientRequest: {
+    RAY_LOG(INFO) << "MessageType_RegisterClientRequest START " << current_time_ms();
     auto message = flatbuffers::GetRoot<protocol::RegisterClientRequest>(message_data);
     if (message->is_worker()) {
       // Create a new worker from the registration request.
@@ -309,8 +313,10 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
       // Register the new worker.
       worker_pool_.RegisterWorker(std::move(worker));
     }
+    RAY_LOG(INFO) << "MessageType_RegisterClientRequest END " << current_time_ms();
   } break;
   case protocol::MessageType_GetTask: {
+    RAY_LOG(INFO) << "MessageType_GetTask START " << current_time_ms();
     std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
     RAY_CHECK(worker);
     // If the worker was assigned a task, mark it as finished.
@@ -320,10 +326,12 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     // Return the worker to the idle pool.
     worker_pool_.PushWorker(worker);
     // Call task dispatch to assign work to the new worker.
+    RAY_LOG(INFO) << "MessageType_GetTask END " << current_time_ms();
     DispatchTasks();
 
   } break;
   case protocol::MessageType_DisconnectClient: {
+    RAY_LOG(INFO) << "MessageType_DisconnectClient START " << current_time_ms();
     // Remove the dead worker from the pool and stop listening for messages.
     const std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
     if (worker) {
@@ -334,9 +342,11 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
       //    << "Worker died while executing task: " << worker->GetAssignedTaskId();
       worker_pool_.DisconnectWorker(worker);
     }
+    RAY_LOG(INFO) << "MessageType_DisconnectClient END " << current_time_ms();
     return;
   } break;
   case protocol::MessageType_SubmitTask: {
+    RAY_LOG(INFO) << "MessageType_SubmitTask START " << current_time_ms();
     // Read the task submitted by the client.
     auto message = flatbuffers::GetRoot<protocol::SubmitTaskRequest>(message_data);
     TaskExecutionSpecification task_execution_spec(
@@ -346,8 +356,10 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     // Submit the task to the local scheduler. Since the task was submitted
     // locally, there is no uncommitted lineage.
     SubmitTask(task, Lineage());
+    RAY_LOG(INFO) << "MessageType_SubmitTask END " << current_time_ms();
   } break;
   case protocol::MessageType_ReconstructObject: {
+    RAY_LOG(INFO) << "MessageType_ReconstructObject START " << current_time_ms();
     // TODO(hme): handle multiple object ids.
     auto message = flatbuffers::GetRoot<protocol::ReconstructObject>(message_data);
     ObjectID object_id = from_flatbuf(*message->object_id());
@@ -360,6 +372,7 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     // worker is unblocked.
     std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
     if (worker && !worker->IsBlocked()) {
+      RAY_LOG(INFO) << "MessageType_NotifyUnblocked BLOCKING WORKER " << current_time_ms();
       RAY_CHECK(!worker->GetAssignedTaskId().is_nil());
       auto tasks = local_queues_.RemoveTasks({worker->GetAssignedTaskId()});
       const auto &task = tasks.front();
@@ -379,10 +392,12 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
 
       // Try to dispatch more tasks since the blocked worker released some
       // resources.
+      RAY_LOG(INFO) << "MessageType_ReconstructObject END " << current_time_ms();
       DispatchTasks();
     }
   } break;
   case protocol::MessageType_NotifyUnblocked: {
+    RAY_LOG(INFO) << "MessageType_NotifyUnblocked START " << current_time_ms();
     std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
     // Re-acquire the CPU resources for the task that was assigned to the
     // unblocked worker.
@@ -412,6 +427,7 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
       local_queues_.QueueRunningTasks(tasks);
       worker->MarkUnblocked();
     }
+    RAY_LOG(INFO) << "MessageType_NotifyUnblocked END " << current_time_ms();
   } break;
   case protocol::MessageType_PlasmaFetchRequest: {
     auto message = flatbuffers::GetRoot<protocol::PlasmaFetchRequest>(message_data);
@@ -439,6 +455,7 @@ void NodeManager::ProcessNodeManagerMessage(
     const uint8_t *message_data) {
   switch (message_type) {
   case protocol::MessageType_ForwardTaskRequest: {
+    RAY_LOG(INFO) << "MessageType_ForwardTaskRequest START " << current_time_ms();
     auto message = flatbuffers::GetRoot<protocol::ForwardTaskRequest>(message_data);
     TaskID task_id = from_flatbuf(*message->task_id());
 
@@ -447,6 +464,7 @@ void NodeManager::ProcessNodeManagerMessage(
     RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
                    << " spillback=" << task.GetTaskExecutionSpecReadonly().NumForwards();
     SubmitTask(task, uncommitted_lineage);
+    RAY_LOG(INFO) << "MessageType_ForwardTaskRequest END " << current_time_ms();
   } break;
   default:
     RAY_LOG(FATAL) << "Received unexpected message type " << message_type;
@@ -455,13 +473,16 @@ void NodeManager::ProcessNodeManagerMessage(
 }
 
 void NodeManager::HandleWaitingTaskReady(const TaskID &task_id) {
+  RAY_LOG(INFO) << "HandleWaitingTaskReady START " << current_time_ms();
   auto ready_tasks = local_queues_.RemoveTasks({task_id});
   local_queues_.QueueReadyTasks(std::vector<Task>(ready_tasks));
   // Schedule the newly ready tasks if possible.
   ScheduleTasks();
+  RAY_LOG(INFO) << "HandleWaitingTaskReady END " << current_time_ms();
 }
 
 void NodeManager::ScheduleTasks() {
+  RAY_LOG(INFO) << "ScheduleTasks START " << current_time_ms();
   // This method performs the transition of tasks from PENDING to SCHEDULED.
   auto policy_decision = scheduling_policy_.Schedule(
       cluster_resource_map_, gcs_client_->client_table().GetLocalClientId(),
@@ -495,9 +516,11 @@ void NodeManager::ScheduleTasks() {
   std::vector<Task> tasks = local_queues_.RemoveTasks(local_task_ids);
   local_queues_.QueueScheduledTasks(tasks);
   DispatchTasks();
+  RAY_LOG(INFO) << "ScheduleTasks END " << current_time_ms();
 }
 
 void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineage) {
+  RAY_LOG(INFO) << "SubmitTask START " << current_time_ms();
   const TaskSpecification &spec = task.GetTaskSpecification();
 
   // Add the task and its uncommitted lineage to the lineage cache.
@@ -545,9 +568,11 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
     // This is a non-actor task. Queue the task for local execution.
     QueueTask(task);
   }
+  RAY_LOG(INFO) << "SubmitTask END " << current_time_ms();
 }
 
 void NodeManager::QueueTask(const Task &task) {
+  RAY_LOG(INFO) << "QueueTask START " << current_time_ms();
   // Queue the task depending on the availability of its arguments.
   if (task_dependency_manager_.TaskReady(task)) {
     local_queues_.QueueReadyTasks(std::vector<Task>({task}));
@@ -556,15 +581,18 @@ void NodeManager::QueueTask(const Task &task) {
     local_queues_.QueueWaitingTasks(std::vector<Task>({task}));
     task_dependency_manager_.SubscribeTaskReady(task);
   }
+  RAY_LOG(INFO) << "QueueTask END " << current_time_ms();
 }
 
 void NodeManager::AssignTask(Task &task) {
+  RAY_LOG(INFO) << "AssignTask START " << current_time_ms();
   const TaskSpecification &spec = task.GetTaskSpecification();
 
   // If this is an actor task, check that the new task has the correct counter.
   if (spec.IsActorTask()) {
     if (CheckDuplicateActorTask(actor_registry_, spec)) {
       // Drop tasks that have already been executed.
+      RAY_LOG(INFO) << "AssignTask END (duplicate) " << current_time_ms();
       return;
     }
   }
@@ -581,6 +609,7 @@ void NodeManager::AssignTask(Task &task) {
     // Queue this task for future assignment. The task will be assigned to a
     // worker once one becomes available.
     local_queues_.QueueScheduledTasks(std::vector<Task>({task}));
+    RAY_LOG(INFO) << "AssignTask END (noworker) " << task.GetTaskSpecification().TaskId() << " " << current_time_ms();
     return;
   }
 
@@ -630,9 +659,11 @@ void NodeManager::AssignTask(Task &task) {
     // worker once one becomes available.
     local_queues_.QueueScheduledTasks(std::vector<Task>({task}));
   }
+  RAY_LOG(INFO) << "AssignTask END " << task.GetTaskSpecification().TaskId() << " " << current_time_ms();
 }
 
 void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
+  RAY_LOG(INFO) << "FinishAssignedTask START " << current_time_ms();
   TaskID task_id = worker->GetAssignedTaskId();
   RAY_LOG(DEBUG) << "Finished task " << task_id;
   auto tasks = local_queues_.RemoveTasks({task_id});
@@ -678,6 +709,7 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
 
   // Unset the worker's assigned task.
   worker->AssignTaskId(TaskID::nil());
+  RAY_LOG(INFO) << "FinishAssignedTask END " << current_time_ms();
 }
 
 void NodeManager::ResubmitTask(const TaskID &task_id) {
@@ -685,12 +717,14 @@ void NodeManager::ResubmitTask(const TaskID &task_id) {
 }
 
 ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) {
+  RAY_LOG(INFO) << "ForwardTask START " << current_time_ms();
   const auto &spec = task.GetTaskSpecification();
   auto task_id = spec.TaskId();
 
   // Get and serialize the task's uncommitted lineage.
+  RAY_LOG(INFO) << "GetUncommittedLineage START " << current_time_ms();
   auto uncommitted_lineage = lineage_cache_.GetUncommittedLineage(task_id);
-  RAY_LOG(INFO) << "[ForwardTask] lineage size " << uncommitted_lineage.Size() << " " << current_time_ms();
+  RAY_LOG(INFO) << "GetUncommittedLineage END " << current_time_ms();
   Task &lineage_cache_entry_task =
       uncommitted_lineage.GetEntryMutable(task_id)->TaskDataMutable();
   // Increment forward count for the forwarded task.
@@ -733,6 +767,11 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
         for (int j = 0; j < count; j++) {
           ObjectID argument_id = spec.ArgId(i, j);
           // If the argument is local, then push it to the receiving node.
+          RAY_LOG(INFO) << "PREEMPTIVE PUSH SEND? "
+                        << task_id << " "
+                        << argument_id << " "
+                        << task_dependency_manager_.CheckObjectLocal(argument_id) << " "
+                        << current_time_ms();
           if (task_dependency_manager_.CheckObjectLocal(argument_id)) {
             RAY_CHECK_OK(object_manager_.Push(argument_id, node_id));
           } else {
@@ -747,6 +786,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
     RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task " << task_id
                    << " to node " << node_id;
   }
+  RAY_LOG(INFO) << "ForwardTask END " << current_time_ms();
   return status;
 }
 

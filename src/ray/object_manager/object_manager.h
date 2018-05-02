@@ -194,9 +194,17 @@ class ObjectManager {
   /// Objects that are currently being received.
   std::unordered_set<ObjectID, UniqueIDHasher> in_transit_receives_;
 
+  int64_t current_time_ms() {
+    std::chrono::milliseconds ms_since_epoch =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch());
+    return ms_since_epoch.count();
+  }
+
   void TryRemoveInTransitSend(const ObjectID &object_id, const ClientID &client_id) {
     main_service_->post([this, object_id, client_id](){
       if (--in_transit_sends_[object_id][client_id] == 0) {
+        RAY_LOG(INFO) << "SendPush END " << object_id << current_time_ms();
         RAY_LOG(DEBUG) << "in_transit_sends_ erase " << object_id;
         in_transit_sends_[object_id].erase(client_id);
       };
