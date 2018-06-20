@@ -16,6 +16,7 @@ import redis
 from ray.core.generated.DriverTableMessage import DriverTableMessage
 from ray.core.generated.GcsTableEntry import GcsTableEntry
 from ray.core.generated.HeartbeatTableData import HeartbeatTableData
+from ray.core.generated.ClientTableData import ClientTableData
 from ray.core.generated.LocalSchedulerInfoMessage import \
     LocalSchedulerInfoMessage
 from ray.core.generated.SubscribeToDBClientTableReply import \
@@ -41,6 +42,9 @@ DRIVER_DEATH_CHANNEL = b"driver_deaths"
 
 # xray heartbeats
 XRAY_HEARTBEAT_CHANNEL = b"6"
+
+# xray client table
+XRAY_CLIENT_CHANNEL = b"3"
 
 # common/redis_module/ray_redis_module.cc
 OBJECT_INFO_PREFIX = b"OI:"
@@ -218,18 +222,32 @@ class Monitor(object):
         # Exit if we are using the raylet code path because client_table is
         # implemented differently. TODO(rkn): Fix this.
         if self.use_raylet:
-            return
-
-        clients = self.state.client_table()
-        for node_ip_address, node_clients in clients.items():
-            for client in node_clients:
-                db_client_id = client["DBClientID"]
-                client_type = client["ClientType"]
-                if client["Deleted"]:
-                    if client_type == LOCAL_SCHEDULER_CLIENT_TYPE:
-                        self.dead_local_schedulers.add(db_client_id)
-                    elif client_type == PLASMA_MANAGER_CLIENT_TYPE:
-                        self.dead_plasma_managers.add(db_client_id)
+            clients = self.state.client_table()
+            dead_clients = set()
+            # print("\nclients")
+            for client_info in clients:
+                client_id = client_info['ClientID']
+                # print(client_id, client_info['IsInsertion'])
+                if client_info['IsInsertion']:
+                    if client_id in dead_clients:
+                        dead_clients.remove(client_id)
+                else:
+                    dead_clients.add(client_id)
+            for client_id in dead_clients:
+                # Add to both sets since plasma manager runs within raylet process.
+                self.dead_local_schedulers.add(client_id)
+                self.dead_plasma_managers.add(client_id)
+        else:
+            clients = self.state.client_table()
+            for node_ip_address, node_clients in clients.items():
+                for client in node_clients:
+                    db_client_id = client["DBClientID"]
+                    client_type = client["ClientType"]
+                    if client["Deleted"]:
+                        if client_type == LOCAL_SCHEDULER_CLIENT_TYPE:
+                            self.dead_local_schedulers.add(db_client_id)
+                        elif client_type == PLASMA_MANAGER_CLIENT_TYPE:
+                            self.dead_plasma_managers.add(db_client_id)
 
     def subscribe_handler(self, channel, data):
         """Handle a subscription success message from Redis."""
@@ -315,6 +333,29 @@ class Monitor(object):
         else:
             print("Warning: could not find ip for client {}."
                   .format(client_id))
+
+    def xray_client_notification_handler(self, unused_channel, data):
+        """Handle an xray client table message from Redis."""
+        # print("xray_client_notification_handler")
+        gcs_entry = GcsTableEntry.GetRootAsGcsTableEntry(data, 0)
+
+        dead_clients = set()
+        for i in range(gcs_entry.EntriesLength()):
+            client = ClientTableData.GetRootAsClientTableData(
+                gcs_entry.Entries(i), 0)
+            client_id = ray.utils.binary_to_hex(client.ClientId())
+            is_insertion = client.IsInsertion()
+            print("xray_client_notification_handler", client_id, is_insertion)
+            if is_insertion:
+                if client_id in dead_clients:
+                    dead_clients.remove(client_id)
+            else:
+                dead_clients.add(client_id)
+
+        for client_id in dead_clients:
+            # Add to both sets since plasma manager runs within raylet process.
+            self.dead_local_schedulers.add(client_id)
+            self.dead_plasma_managers.add(client_id)
 
     def plasma_manager_heartbeat_handler(self, unused_channel, data):
         """Handle a plasma manager heartbeat from Redis.
@@ -513,6 +554,9 @@ class Monitor(object):
             elif channel == XRAY_HEARTBEAT_CHANNEL:
                 # Similar functionality as local scheduler info channel
                 message_handler = self.xray_heartbeat_handler
+            elif channel == XRAY_CLIENT_CHANNEL:
+                # Similar functionality as db client notification handler.
+                message_handler = self.xray_client_notification_handler
             else:
                 raise Exception("This code should be unreachable.")
 
@@ -546,6 +590,7 @@ class Monitor(object):
         self.subscribe(PLASMA_MANAGER_HEARTBEAT_CHANNEL)
         self.subscribe(DRIVER_DEATH_CHANNEL)
         self.subscribe(XRAY_HEARTBEAT_CHANNEL)
+        self.subscribe(XRAY_CLIENT_CHANNEL)
 
         # Scan the database table for dead database clients. NOTE: This must be
         # called before reading any messages from the subscription channel.
@@ -587,8 +632,10 @@ class Monitor(object):
             # If any new local schedulers or plasma managers were marked as
             # dead in this round, clean up the associated state.
             if len(self.dead_local_schedulers) > num_dead_local_schedulers:
+                # print("self.cleanup_task_table")
                 self.cleanup_task_table()
             if len(self.dead_plasma_managers) > num_dead_plasma_managers:
+                # print("self.cleanup_object_table")
                 self.cleanup_object_table()
 
             # Handle plasma managers that timed out during this round.
